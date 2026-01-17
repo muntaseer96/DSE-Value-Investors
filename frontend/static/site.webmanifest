@@ -1,0 +1,21 @@
+{
+  "name": "Stokr",
+  "short_name": "Stokr",
+  "description": "Smart stock analysis and value investing tools. Don't Lose Money.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1e40af",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

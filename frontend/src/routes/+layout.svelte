@@ -45,13 +45,8 @@
         <div class="sidebar-brand">
             <a href="/" class="brand-link">
                 <span class="brand-icon">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                        <path d="M2 17l10 5 10-5"/>
-                        <path d="M2 12l10 5 10-5"/>
-                    </svg>
+                    <img src="/logo.png" alt="Stokr" width="28" height="28" />
                 </span>
-                <span class="brand-text">Stokr</span>
             </a>
         </div>
 
@@ -153,14 +148,7 @@
             </button>
 
             <a href="/" class="mobile-brand">
-                <span class="brand-icon-sm">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                        <path d="M2 17l10 5 10-5"/>
-                        <path d="M2 12l10 5 10-5"/>
-                    </svg>
-                </span>
-                Stokr
+                <img src="/logo.png" alt="Stokr" width="32" height="32" />
             </a>
 
             <button class="theme-toggle-mobile" on:click={toggleTheme} aria-label="Toggle theme">
@@ -220,14 +208,16 @@
     }
 
     .sidebar-brand {
-        padding: 1.25rem;
+        padding: 1.25rem 0.875rem;
         border-bottom: 1px solid var(--sidebar-border);
+        display: flex;
+        justify-content: center;
     }
 
     .brand-link {
         display: flex;
         align-items: center;
-        gap: 0.75rem;
+        justify-content: center;
         text-decoration: none;
         color: var(--sidebar-text);
     }
@@ -236,12 +226,17 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 44px;
-        height: 44px;
-        background: var(--accent-primary);
+        width: 52px;
+        height: 52px;
         border-radius: var(--radius-md);
-        color: white;
         flex-shrink: 0;
+        overflow: hidden;
+    }
+
+    .brand-icon img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
     }
 
     .brand-text {
@@ -455,7 +450,14 @@
         }
 
         .brand-icon-sm {
-            color: var(--accent-primary);
+            display: flex;
+            align-items: center;
+        }
+
+        .brand-icon-sm img {
+            width: 24px;
+            height: 24px;
+            object-fit: contain;
         }
 
         .mobile-overlay {
