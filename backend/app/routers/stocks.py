@@ -1,13 +1,29 @@
 """Stock data API endpoints."""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
+import asyncio
+import logging
 
 from app.database import get_db
 from app.models import Stock, FinancialData
 from app.services import DSEDataService
+
+logger = logging.getLogger(__name__)
+
+# Global state for tracking batch scrape progress
+_scrape_progress: Dict[str, Any] = {
+    "running": False,
+    "current": 0,
+    "total": 0,
+    "current_symbol": "",
+    "success_count": 0,
+    "failed_count": 0,
+    "started_at": None,
+    "results": None,
+}
 
 router = APIRouter(prefix="/stocks", tags=["Stocks"])
 
@@ -341,6 +357,334 @@ def calculate_metrics(symbol: str, db: Session = Depends(get_db)):
         "message": f"Recalculated metrics for {symbol}",
         "years_updated": updated,
     }
+
+
+# ============================================================================
+# LankaBD Scraping Endpoints
+# ============================================================================
+
+class LankaBDScrapeRequest(BaseModel):
+    """Request model for batch scraping."""
+    symbols: Optional[List[str]] = None  # If None, scrape all stocks in database
+
+
+class LankaBDScrapeResult(BaseModel):
+    """Response model for scrape results."""
+    symbol: str
+    success: bool
+    error: Optional[str] = None
+    years_scraped: Optional[int] = None
+
+
+@router.post("/{symbol}/scrape-lankabd")
+async def scrape_lankabd_single(
+    symbol: str,
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """Scrape financial data from lankabd.com for a single stock.
+
+    This fetches comprehensive financial statement data (Balance Sheet,
+    Income Statement, Cash Flow) that is not available from stocksurferbd.
+
+    Args:
+        symbol: Stock symbol (e.g., 'OLYMPIC', 'BEXIMCO')
+
+    Returns:
+        Scrape result with data or error
+    """
+    try:
+        from app.services.lankabd_scraper import scrape_single_stock
+
+        result = await scrape_single_stock(symbol.upper())
+
+        if not result["success"]:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Failed to scrape {symbol}: {result.get('error', 'Unknown error')}"
+            )
+
+        # Save to database
+        years_saved = _save_lankabd_data(db, symbol.upper(), result["data"])
+
+        return {
+            "message": f"Successfully scraped financial data for {symbol}",
+            "symbol": symbol.upper(),
+            "years_scraped": len(result["data"]),
+            "years_saved": years_saved,
+            "data": result["data"],
+            "scraped_at": result.get("scraped_at"),
+        }
+
+    except ImportError as e:
+        raise HTTPException(
+            status_code=503,
+            detail="LankaBD scraper not available. Install playwright: pip install playwright && playwright install chromium"
+        )
+    except Exception as e:
+        logger.error(f"Error scraping {symbol}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+@router.post("/scrape-lankabd-batch")
+async def scrape_lankabd_batch(
+    background_tasks: BackgroundTasks,
+    request: LankaBDScrapeRequest = None,
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """Start batch scraping of financial data from lankabd.com.
+
+    Runs in background. Use GET /stocks/scrape-lankabd-status to check progress.
+
+    Args:
+        request: Optional list of symbols. If not provided, scrapes all stocks in portfolio.
+
+    Returns:
+        Status message with total stocks to scrape
+    """
+    global _scrape_progress
+
+    if _scrape_progress["running"]:
+        return {
+            "status": "already_running",
+            "message": "Batch scrape already in progress",
+            "progress": {
+                "current": _scrape_progress["current"],
+                "total": _scrape_progress["total"],
+                "current_symbol": _scrape_progress["current_symbol"],
+            }
+        }
+
+    # Determine symbols to scrape
+    if request and request.symbols:
+        symbols = [s.upper() for s in request.symbols]
+    else:
+        # Get all unique symbols from financial_data table
+        symbols = db.query(FinancialData.stock_symbol).distinct().all()
+        symbols = [s[0] for s in symbols]
+
+        # If no financial data yet, get from portfolio
+        if not symbols:
+            from app.models import PortfolioHolding
+            holdings = db.query(PortfolioHolding.stock_symbol).distinct().all()
+            symbols = [h[0] for h in holdings]
+
+    if not symbols:
+        raise HTTPException(
+            status_code=400,
+            detail="No symbols to scrape. Add stocks to portfolio first or provide symbols list."
+        )
+
+    # Reset progress
+    _scrape_progress = {
+        "running": True,
+        "current": 0,
+        "total": len(symbols),
+        "current_symbol": "",
+        "success_count": 0,
+        "failed_count": 0,
+        "started_at": datetime.now().isoformat(),
+        "results": None,
+    }
+
+    # Start background task
+    background_tasks.add_task(_run_batch_scrape, symbols, db)
+
+    return {
+        "status": "started",
+        "message": f"Started scraping {len(symbols)} stocks in background",
+        "total_stocks": len(symbols),
+        "symbols": symbols[:10],  # Show first 10
+        "check_progress_at": "/stocks/scrape-lankabd-status"
+    }
+
+
+@router.get("/scrape-lankabd-status")
+async def get_scrape_status() -> Dict[str, Any]:
+    """Get current status of batch LankaBD scrape operation.
+
+    Returns:
+        Current progress and results if complete
+    """
+    global _scrape_progress
+
+    response = {
+        "running": _scrape_progress["running"],
+        "current": _scrape_progress["current"],
+        "total": _scrape_progress["total"],
+        "current_symbol": _scrape_progress["current_symbol"],
+        "success_count": _scrape_progress["success_count"],
+        "failed_count": _scrape_progress["failed_count"],
+        "started_at": _scrape_progress["started_at"],
+    }
+
+    if _scrape_progress["total"] > 0:
+        response["progress_percent"] = round(
+            _scrape_progress["current"] / _scrape_progress["total"] * 100, 1
+        )
+
+    if not _scrape_progress["running"] and _scrape_progress["results"]:
+        response["completed"] = True
+        response["completed_at"] = _scrape_progress["results"].get("completed_at")
+        # Include failed symbols for retry
+        if _scrape_progress["results"].get("failed"):
+            response["failed_symbols"] = [
+                r["symbol"] for r in _scrape_progress["results"]["failed"]
+            ]
+
+    return response
+
+
+@router.post("/scrape-lankabd-stop")
+async def stop_batch_scrape() -> Dict[str, Any]:
+    """Stop the running batch scrape operation.
+
+    Note: This marks the scrape as stopped but may not immediately halt
+    the current stock being scraped.
+
+    Returns:
+        Status message
+    """
+    global _scrape_progress
+
+    if not _scrape_progress["running"]:
+        return {"status": "not_running", "message": "No batch scrape is running"}
+
+    _scrape_progress["running"] = False
+
+    return {
+        "status": "stopping",
+        "message": "Batch scrape will stop after current stock completes",
+        "scraped_so_far": _scrape_progress["current"],
+    }
+
+
+async def _run_batch_scrape(symbols: List[str], db: Session):
+    """Background task to run batch scraping.
+
+    Args:
+        symbols: List of symbols to scrape
+        db: Database session
+    """
+    global _scrape_progress
+
+    try:
+        from app.services.lankabd_scraper import LankaBDScraper
+
+        def progress_callback(current: int, total: int, symbol: str, success: bool):
+            _scrape_progress["current"] = current
+            _scrape_progress["current_symbol"] = symbol
+            if success:
+                _scrape_progress["success_count"] += 1
+            else:
+                _scrape_progress["failed_count"] += 1
+
+        async with LankaBDScraper() as scraper:
+            results = {"success": [], "failed": []}
+
+            for i, symbol in enumerate(symbols):
+                # Check if stopped
+                if not _scrape_progress["running"]:
+                    logger.info("Batch scrape stopped by user")
+                    break
+
+                _scrape_progress["current_symbol"] = symbol
+
+                result = await scraper.scrape_stock(symbol)
+
+                if result["success"]:
+                    # Save to database
+                    years_saved = _save_lankabd_data(db, symbol, result["data"])
+                    result["years_saved"] = years_saved
+                    results["success"].append(result)
+                    _scrape_progress["success_count"] += 1
+                else:
+                    results["failed"].append(result)
+                    _scrape_progress["failed_count"] += 1
+
+                _scrape_progress["current"] = i + 1
+
+                # Rate limiting
+                if i < len(symbols) - 1:
+                    await asyncio.sleep(2.0)
+
+            results["completed_at"] = datetime.now().isoformat()
+            _scrape_progress["results"] = results
+
+    except Exception as e:
+        logger.error(f"Batch scrape error: {e}")
+        _scrape_progress["results"] = {"error": str(e)}
+
+    finally:
+        _scrape_progress["running"] = False
+
+
+def _save_lankabd_data(db: Session, symbol: str, data: List[Dict]) -> int:
+    """Save scraped LankaBD data to database.
+
+    Args:
+        db: Database session
+        symbol: Stock symbol
+        data: List of year-wise financial data
+
+    Returns:
+        Number of years saved/updated
+    """
+    saved = 0
+
+    for record in data:
+        year = record.get("year")
+        if not year:
+            continue
+
+        # Find or create the record
+        existing = db.query(FinancialData).filter(
+            FinancialData.stock_symbol == symbol,
+            FinancialData.year == year
+        ).first()
+
+        if not existing:
+            existing = FinancialData(
+                stock_symbol=symbol,
+                year=year,
+                source="lankabd"
+            )
+            db.add(existing)
+
+        # Update fields from scraped data
+        field_mapping = {
+            "revenue": "revenue",
+            "gross_profit": "gross_profit",
+            "operating_income": "operating_income",
+            "net_income": "net_income",
+            "eps": "eps",
+            "total_assets": "total_assets",
+            "total_equity": "total_equity",
+            "total_debt": "total_debt",
+            "operating_cash_flow": "operating_cash_flow",
+            "capital_expenditure": "capital_expenditure",
+            "free_cash_flow": "free_cash_flow",
+        }
+
+        for scrape_field, db_field in field_mapping.items():
+            if scrape_field in record and record[scrape_field] is not None:
+                setattr(existing, db_field, record[scrape_field])
+
+        # Update source
+        if existing.source and "lankabd" not in existing.source:
+            existing.source = f"{existing.source}+lankabd"
+        else:
+            existing.source = "lankabd"
+
+        # Recalculate derived metrics
+        existing = _calculate_derived_metrics(existing)
+
+        saved += 1
+
+    db.commit()
+    return saved
 
 
 def _calculate_derived_metrics(record: FinancialData) -> FinancialData:

@@ -29,3 +29,8 @@ python-dateutil
 # Validation
 pydantic
 pydantic-settings
+
+# LankaBD scraping (financial statements)
+playwright>=1.40.0
+beautifulsoup4
+lxml

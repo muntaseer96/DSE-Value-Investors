@@ -8,7 +8,6 @@
     let loading = true;
     let error = '';
     let searchQuery = '';
-    let limit = 200;
     let viewMode: 'table' | 'grid' = 'table';
 
     // Sorting
@@ -77,7 +76,7 @@
         stocksLoading.set(true);
         stocksError.set('');
 
-        const result = await stocks.getPrices(limit);
+        const result = await stocks.getPrices();
 
         if (result.error) {
             stocksError.set(result.error);

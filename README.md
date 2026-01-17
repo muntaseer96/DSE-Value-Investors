@@ -13,27 +13,6 @@ A comprehensive stock analysis and portfolio tracking application for the **Dhak
 
 ---
 
-## 🚀 Deploy to Render (Production)
-
-### One-Click Deploy
-
-1. Push this repo to GitHub
-2. Go to [Render Dashboard](https://dashboard.render.com)
-3. Click **New** → **Blueprint**
-4. Connect your GitHub repo
-5. Render will automatically create:
-   - Backend API (Python)
-   - Frontend (Static Site)
-   - PostgreSQL Database
-
-That's it! Your app will be live in ~5 minutes.
-
-### Manual Deploy
-
-See [Render Deployment Guide](#render-deployment-guide) below.
-
----
-
 ## 💻 Local Development
 
 ### Prerequisites
@@ -89,7 +68,6 @@ cd frontend && npm run dev
 │   │   ├── lib/api/        # API client
 │   │   └── routes/         # Pages
 │   └── package.json
-├── render.yaml              # Render Blueprint (one-click deploy)
 └── README.md
 ```
 
@@ -152,25 +130,23 @@ cd frontend && npm run dev
 
 ---
 
-## Render Deployment Guide
+## Deployment
+
+**Backend:** Railway
+**Frontend:** Netlify
+**Database:** Supabase PostgreSQL
 
 ### Environment Variables
 
-**Backend (dse-investor-api):**
+**Backend (Railway):**
 ```
-DATABASE_URL=<from Render PostgreSQL>
-FRONTEND_URL=https://your-frontend.onrender.com
-```
-
-**Frontend (dse-investor-frontend):**
-```
-VITE_API_URL=https://your-api.onrender.com
+DATABASE_URL=postgresql://...@db.kjjringoshpczqttxaib.supabase.co:5432/postgres
 ```
 
-### Free Tier Limits
-- Backend: Sleeps after 15 min inactivity (cold start ~30s)
-- Database: 1GB storage, 90 days retention
-- Upgrade to paid ($7/mo) for always-on
+**Frontend (Netlify):**
+```
+VITE_API_URL=https://your-api.railway.app
+```
 
 ---
 
@@ -179,7 +155,7 @@ VITE_API_URL=https://your-api.onrender.com
 - **Backend**: FastAPI, SQLAlchemy, PostgreSQL
 - **Frontend**: SvelteKit, TypeScript
 - **Data**: stocksurferbd, bdshare (DSE APIs)
-- **Deployment**: Render
+- **Deployment**: Railway (backend), Netlify (frontend), Supabase (database)
 
 ## License
 

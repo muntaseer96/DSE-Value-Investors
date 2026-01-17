@@ -42,6 +42,7 @@
     let financialSuccess = '';
     let calculatedMetrics: any = null;
 
+
     onMount(async () => {
         let isLoaded = false;
         portfolioLoaded.subscribe(v => isLoaded = v)();
@@ -430,7 +431,7 @@
                 </button>
             </form>
         </div>
-    {:else}
+    {:else if activeTab === 'financial'}
         <!-- Financial Data Entry -->
         <div class="card animate-fadeIn stagger-2">
             <div class="card-header">
