@@ -1,28 +1,42 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { portfolio, type PortfolioSummary, type HoldingResponse } from '$lib/api/client';
+    import { portfolioData, portfolioLoaded, portfolioLoading, portfolioError } from '$lib/stores/portfolio';
 
+    // Use store values
     let data: PortfolioSummary | null = null;
     let loading = true;
     let error = '';
 
+    // Subscribe to stores
+    portfolioData.subscribe(v => data = v);
+    portfolioLoading.subscribe(v => loading = v);
+    portfolioError.subscribe(v => error = v);
+
     onMount(async () => {
-        await loadPortfolio();
+        // Only fetch if not already loaded
+        let isLoaded = false;
+        portfolioLoaded.subscribe(v => isLoaded = v)();
+
+        if (!isLoaded) {
+            await loadPortfolio();
+        }
     });
 
     async function loadPortfolio() {
-        loading = true;
-        error = '';
+        portfolioLoading.set(true);
+        portfolioError.set('');
 
         const result = await portfolio.get();
 
         if (result.error) {
-            error = result.error;
+            portfolioError.set(result.error);
         } else if (result.data) {
-            data = result.data;
+            portfolioData.set(result.data);
+            portfolioLoaded.set(true);
         }
 
-        loading = false;
+        portfolioLoading.set(false);
     }
 
     async function seedPortfolio() {
@@ -120,6 +134,7 @@
                                 <th>Stock</th>
                                 <th class="text-right">Shares</th>
                                 <th class="text-right">Avg Cost</th>
+                                <th class="text-right">Total Cost</th>
                                 <th class="text-right">Current</th>
                                 <th class="text-right">Value</th>
                                 <th class="text-right">P&L</th>
@@ -137,6 +152,7 @@
                                     </td>
                                     <td class="text-right">{holding.shares}</td>
                                     <td class="text-right">{formatCurrency(holding.avg_cost)}</td>
+                                    <td class="text-right">{formatCurrency(holding.total_cost)}</td>
                                     <td class="text-right">
                                         {holding.current_price ? formatCurrency(holding.current_price) : '-'}
                                     </td>

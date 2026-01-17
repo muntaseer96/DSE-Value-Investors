@@ -1,13 +1,20 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    import { portfolioData, portfolioLoaded, portfolioLoading as pLoading } from '$lib/stores/portfolio';
 
     const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-    // Portfolio Management
+    // Portfolio Management - use store
     let portfolioHoldings: any[] = [];
     let portfolioLoading = false;
     let portfolioError = '';
     let portfolioSuccess = '';
+
+    // Subscribe to portfolio store
+    portfolioData.subscribe(v => {
+        if (v) portfolioHoldings = v.holdings || [];
+    });
+    pLoading.subscribe(v => portfolioLoading = v);
 
     // New holding form
     let newHolding = {
@@ -17,19 +24,16 @@
         notes: ''
     };
 
-    // Financial Data Entry
+    // Financial Data Entry - Only fields NOT provided by API
+    // API already provides: Revenue, EPS, Total Equity
     let financialSymbol = '';
     let financialYear = new Date().getFullYear();
     let financialData = {
-        revenue: null as number | null,
         net_income: null as number | null,
-        eps: null as number | null,
-        total_equity: null as number | null,
         total_assets: null as number | null,
         total_debt: null as number | null,
         operating_cash_flow: null as number | null,
-        capital_expenditure: null as number | null,
-        free_cash_flow: null as number | null
+        capital_expenditure: null as number | null
     };
     let financialLoading = false;
     let financialError = '';
@@ -37,7 +41,13 @@
     let calculatedMetrics: any = null;
 
     onMount(async () => {
-        await loadPortfolio();
+        // Only fetch if not already loaded in store
+        let isLoaded = false;
+        portfolioLoaded.subscribe(v => isLoaded = v)();
+
+        if (!isLoaded) {
+            await loadPortfolio();
+        }
     });
 
     async function loadPortfolio() {
@@ -48,6 +58,9 @@
             if (res.ok) {
                 const data = await res.json();
                 portfolioHoldings = data.holdings || [];
+                // Update the store
+                portfolioData.set(data);
+                portfolioLoaded.set(true);
             } else {
                 portfolioError = 'Failed to load portfolio';
             }
@@ -298,8 +311,8 @@
         </div>
 
         <p class="help-text">
-            Enter cash flow and other financial data not available from auto-fetch.
-            ROE, ROA, FCF, and margins will be calculated automatically.
+            Enter data NOT available from auto-fetch (API already provides: Revenue, EPS, Book Value).
+            ROE, ROA, FCF, and D/E ratio will be calculated automatically.
         </p>
 
         {#if financialError}
@@ -310,85 +323,61 @@
         {/if}
 
         <div class="financial-form">
-            <div class="form-group">
-                <label>Stock Symbol</label>
-                <input
-                    type="text"
-                    placeholder="e.g., BXPHARMA"
-                    bind:value={financialSymbol}
-                />
-            </div>
-
-            <div class="form-group">
-                <label>Year</label>
-                <input
-                    type="number"
-                    min="2000"
-                    max="2030"
-                    bind:value={financialYear}
-                />
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Stock Symbol</label>
+                    <input
+                        type="text"
+                        placeholder="e.g., BXPHARMA"
+                        bind:value={financialSymbol}
+                    />
+                </div>
+                <div class="form-group">
+                    <label>Year</label>
+                    <input
+                        type="number"
+                        min="2000"
+                        max="2030"
+                        bind:value={financialYear}
+                    />
+                </div>
             </div>
 
             <hr />
-            <h3>Income Statement</h3>
+            <h3>Missing Data (from Annual Report)</h3>
 
             <div class="form-row">
-                <div class="form-group">
-                    <label>Revenue (Cr)</label>
-                    <input type="number" step="0.01" bind:value={financialData.revenue} placeholder="Total Revenue" />
-                </div>
                 <div class="form-group">
                     <label>Net Income (Cr)</label>
-                    <input type="number" step="0.01" bind:value={financialData.net_income} placeholder="Net Profit" />
-                </div>
-                <div class="form-group">
-                    <label>EPS</label>
-                    <input type="number" step="0.01" bind:value={financialData.eps} placeholder="Earnings Per Share" />
-                </div>
-            </div>
-
-            <hr />
-            <h3>Balance Sheet</h3>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label>Total Equity (Cr)</label>
-                    <input type="number" step="0.01" bind:value={financialData.total_equity} placeholder="Book Value" />
+                    <input type="number" step="0.01" bind:value={financialData.net_income} placeholder="For ROE calc" />
                 </div>
                 <div class="form-group">
                     <label>Total Assets (Cr)</label>
-                    <input type="number" step="0.01" bind:value={financialData.total_assets} placeholder="Total Assets" />
+                    <input type="number" step="0.01" bind:value={financialData.total_assets} placeholder="For ROA calc" />
                 </div>
                 <div class="form-group">
                     <label>Total Debt (Cr)</label>
-                    <input type="number" step="0.01" bind:value={financialData.total_debt} placeholder="Total Debt" />
+                    <input type="number" step="0.01" bind:value={financialData.total_debt} placeholder="For D/E ratio" />
                 </div>
             </div>
-
-            <hr />
-            <h3>Cash Flow Statement</h3>
 
             <div class="form-row">
                 <div class="form-group">
                     <label>Operating Cash Flow (Cr)</label>
-                    <input type="number" step="0.01" bind:value={financialData.operating_cash_flow} placeholder="OCF" />
+                    <input type="number" step="0.01" bind:value={financialData.operating_cash_flow} placeholder="From Cash Flow Statement" />
                 </div>
                 <div class="form-group">
                     <label>Capital Expenditure (Cr)</label>
-                    <input type="number" step="0.01" bind:value={financialData.capital_expenditure} placeholder="CapEx" />
-                </div>
-                <div class="form-group">
-                    <label>Free Cash Flow (Cr)</label>
-                    <input type="number" step="0.01" bind:value={financialData.free_cash_flow} placeholder="FCF (auto-calc if OCF+CapEx)" />
+                    <input type="number" step="0.01" bind:value={financialData.capital_expenditure} placeholder="CapEx - FCF auto-calcs" />
                 </div>
             </div>
 
             <div class="form-actions">
                 <button class="btn btn-primary" on:click={submitFinancialData} disabled={financialLoading}>
-                    {financialLoading ? 'Saving...' : 'Save Financial Data'}
+                    {financialLoading ? 'Saving...' : 'Save Data'}
                 </button>
                 <button class="btn btn-secondary" on:click={recalculateMetrics} disabled={financialLoading}>
-                    Recalculate All Metrics
+                    Recalculate Metrics
                 </button>
             </div>
         </div>
