@@ -1,35 +1,49 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { stocks, type StockPrice } from '$lib/api/client';
+    import { stocksData, stocksLoaded, stocksLoading, stocksError } from '$lib/stores/stocks';
 
+    // Use store values
     let priceData: StockPrice[] = [];
     let loading = true;
     let error = '';
     let searchQuery = '';
-    let limit = 50;
+    let limit = 200;
     let viewMode: 'table' | 'grid' = 'table';
+
+    // Subscribe to stores
+    stocksData.subscribe(v => priceData = v);
+    stocksLoading.subscribe(v => loading = v);
+    stocksError.subscribe(v => error = v);
 
     $: filteredStocks = priceData.filter(stock =>
         stock.symbol?.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
     onMount(async () => {
-        await loadPrices();
+        // Only fetch if not already loaded
+        let isLoaded = false;
+        stocksLoaded.subscribe(v => isLoaded = v)();
+
+        if (!isLoaded) {
+            await loadPrices();
+        }
     });
 
     async function loadPrices() {
-        loading = true;
-        error = '';
+        stocksLoading.set(true);
+        stocksError.set('');
 
         const result = await stocks.getPrices(limit);
 
         if (result.error) {
-            error = result.error;
+            stocksError.set(result.error);
         } else if (result.data) {
-            priceData = result.data;
+            stocksData.set(result.data);
+            stocksLoaded.set(true);
         }
 
-        loading = false;
+        stocksLoading.set(false);
     }
 
     function formatPrice(value: number | undefined | null): string {

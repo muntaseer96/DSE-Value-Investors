@@ -166,6 +166,7 @@
                                 <th class="text-right">Shares</th>
                                 <th class="text-right">Avg Cost</th>
                                 <th class="text-right">Current</th>
+                                <th class="text-right">Total Cost</th>
                                 <th class="text-right">Value</th>
                                 <th class="text-right">P&L</th>
                                 <th class="text-right">Return</th>
@@ -188,6 +189,9 @@
                                     </td>
                                     <td class="text-right tabular-nums">
                                         {holding.current_price ? formatCurrency(holding.current_price) : '-'}
+                                    </td>
+                                    <td class="text-right tabular-nums">
+                                        {formatCurrency(holding.shares * holding.avg_cost)}
                                     </td>
                                     <td class="text-right tabular-nums font-medium">
                                         {holding.current_value ? formatCurrency(holding.current_value) : '-'}
@@ -487,7 +491,7 @@
             gap: 1.5rem;
         }
 
-        /* Hide less important columns on mobile */
+        /* Hide less important columns on mobile: Avg Cost (3), Total Cost (5) */
         th:nth-child(3),
         td:nth-child(3),
         th:nth-child(5),
@@ -497,8 +501,9 @@
     }
 
     @media (max-width: 480px) {
-        th:nth-child(6),
-        td:nth-child(6) {
+        /* Also hide P&L (7) on very small screens */
+        th:nth-child(7),
+        td:nth-child(7) {
             display: none;
         }
     }
