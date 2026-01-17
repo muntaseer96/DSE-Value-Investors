@@ -82,7 +82,7 @@ class ManualFinancialEntry(BaseModel):
 
 
 @router.get("/prices", response_model=List[StockPrice])
-def get_all_prices(limit: int = Query(default=50, le=500)):
+def get_all_prices(limit: int = Query(default=500, le=500)):
     """Get current prices for all DSE stocks."""
     data_service = DSEDataService()
     df = data_service.get_current_prices()
