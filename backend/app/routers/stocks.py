@@ -38,12 +38,31 @@ class StockDetail(BaseModel):
 class FinancialRecord(BaseModel):
     year: int
     revenue: Optional[float] = None
+    net_income: Optional[float] = None
     eps: Optional[float] = None
     total_equity: Optional[float] = None
+    total_assets: Optional[float] = None
+    total_debt: Optional[float] = None
     operating_cash_flow: Optional[float] = None
     free_cash_flow: Optional[float] = None
     roe: Optional[float] = None
+    roa: Optional[float] = None
     debt_to_equity: Optional[float] = None
+    net_margin: Optional[float] = None
+
+
+class ManualFinancialEntry(BaseModel):
+    """Schema for manually entering financial data."""
+    revenue: Optional[float] = None
+    net_income: Optional[float] = None
+    eps: Optional[float] = None
+    total_equity: Optional[float] = None
+    total_assets: Optional[float] = None
+    total_debt: Optional[float] = None
+    operating_cash_flow: Optional[float] = None
+    capital_expenditure: Optional[float] = None
+    free_cash_flow: Optional[float] = None
+    shares_outstanding: Optional[float] = None
 
 
 @router.get("/prices", response_model=List[StockPrice])
@@ -129,7 +148,7 @@ def get_stock_fundamentals(symbol: str, db: Session = Depends(get_db)):
     ).order_by(FinancialData.year.desc()).all()
 
     if financials and len(financials) >= 3:
-        # Return cached data
+        # Return cached data with all available fields
         return {
             "symbol": symbol.upper(),
             "source": "database",
@@ -137,12 +156,17 @@ def get_stock_fundamentals(symbol: str, db: Session = Depends(get_db)):
                 FinancialRecord(
                     year=f.year,
                     revenue=f.revenue,
+                    net_income=f.net_income,
                     eps=f.eps,
                     total_equity=f.total_equity,
+                    total_assets=f.total_assets,
+                    total_debt=f.total_debt,
                     operating_cash_flow=f.operating_cash_flow,
                     free_cash_flow=f.free_cash_flow,
                     roe=f.roe,
+                    roa=f.roa,
                     debt_to_equity=f.debt_to_equity,
+                    net_margin=f.net_margin,
                 ).model_dump()
                 for f in sorted(financials, key=lambda x: x.year)
             ],
@@ -233,6 +257,131 @@ def refresh_fundamentals(symbol: str, db: Session = Depends(get_db)):
         "message": f"Refreshed fundamentals for {symbol}",
         "years_updated": len(parsed_data),
     }
+
+
+@router.put("/{symbol}/financials/{year}")
+def update_financial_data(
+    symbol: str,
+    year: int,
+    data: ManualFinancialEntry,
+    db: Session = Depends(get_db)
+):
+    """Manually enter or update financial data for a stock.
+
+    Use this to add cash flow data and other metrics not available from auto-fetch.
+    Automatically calculates derivable metrics like ROE, ROA, FCF, etc.
+    """
+    symbol = symbol.upper()
+
+    # Find or create the record
+    existing = db.query(FinancialData).filter(
+        FinancialData.stock_symbol == symbol,
+        FinancialData.year == year
+    ).first()
+
+    if not existing:
+        existing = FinancialData(stock_symbol=symbol, year=year, source="manual")
+        db.add(existing)
+
+    # Update provided fields
+    update_data = data.model_dump(exclude_unset=True, exclude_none=True)
+    for key, value in update_data.items():
+        if hasattr(existing, key):
+            setattr(existing, key, value)
+
+    # Calculate derivable metrics
+    existing = _calculate_derived_metrics(existing)
+    existing.source = "manual" if existing.source != "stocksurferbd" else "stocksurferbd+manual"
+
+    db.commit()
+    db.refresh(existing)
+
+    return {
+        "message": f"Updated financial data for {symbol} ({year})",
+        "data": {
+            "year": existing.year,
+            "revenue": existing.revenue,
+            "net_income": existing.net_income,
+            "eps": existing.eps,
+            "total_equity": existing.total_equity,
+            "total_assets": existing.total_assets,
+            "total_debt": existing.total_debt,
+            "operating_cash_flow": existing.operating_cash_flow,
+            "capital_expenditure": existing.capital_expenditure,
+            "free_cash_flow": existing.free_cash_flow,
+            "roe": existing.roe,
+            "roa": existing.roa,
+            "debt_to_equity": existing.debt_to_equity,
+            "net_margin": existing.net_margin,
+            "source": existing.source,
+        }
+    }
+
+
+@router.post("/{symbol}/calculate-metrics")
+def calculate_metrics(symbol: str, db: Session = Depends(get_db)):
+    """Recalculate all derivable metrics for a stock from existing data."""
+    symbol = symbol.upper()
+
+    financials = db.query(FinancialData).filter(
+        FinancialData.stock_symbol == symbol
+    ).all()
+
+    if not financials:
+        raise HTTPException(status_code=404, detail=f"No financial data found for {symbol}")
+
+    updated = []
+    for f in financials:
+        f = _calculate_derived_metrics(f)
+        updated.append(f.year)
+
+    db.commit()
+
+    return {
+        "message": f"Recalculated metrics for {symbol}",
+        "years_updated": updated,
+    }
+
+
+def _calculate_derived_metrics(record: FinancialData) -> FinancialData:
+    """Calculate ROE, ROA, FCF, margins, etc. from available data."""
+
+    # Calculate Free Cash Flow if we have OCF and CapEx
+    if record.operating_cash_flow and record.capital_expenditure:
+        record.free_cash_flow = record.operating_cash_flow - abs(record.capital_expenditure)
+
+    # Calculate ROE = Net Income / Total Equity
+    # If no net income, estimate from EPS * shares (approximate)
+    if record.total_equity and record.total_equity > 0:
+        if record.net_income:
+            record.roe = (record.net_income / record.total_equity) * 100
+        elif record.eps and record.total_equity:
+            # Rough estimate: ROE ≈ EPS / Book Value per Share
+            # If equity is total, we need shares. Estimate ROE from EPS/Equity ratio
+            # This is approximate but useful
+            record.roe = (record.eps / record.total_equity) * 100 if record.total_equity > 0 else None
+
+    # Calculate ROA = Net Income / Total Assets
+    if record.net_income and record.total_assets and record.total_assets > 0:
+        record.roa = (record.net_income / record.total_assets) * 100
+
+    # Calculate Debt to Equity
+    if record.total_debt is not None and record.total_equity and record.total_equity > 0:
+        record.debt_to_equity = record.total_debt / record.total_equity
+
+    # Calculate Net Margin = Net Income / Revenue
+    if record.net_income and record.revenue and record.revenue > 0:
+        record.net_margin = (record.net_income / record.revenue) * 100
+
+    # Calculate Gross Margin if we have gross profit
+    if record.gross_profit and record.revenue and record.revenue > 0:
+        record.gross_margin = (record.gross_profit / record.revenue) * 100
+
+    # Calculate Operating Margin
+    if record.operating_income and record.revenue and record.revenue > 0:
+        record.operating_margin = (record.operating_income / record.revenue) * 100
+
+    return record
 
 
 def _safe_float(val) -> Optional[float]:

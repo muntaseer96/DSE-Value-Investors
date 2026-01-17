@@ -12,6 +12,7 @@
             <a href="/">Portfolio</a>
             <a href="/calculator">Calculator</a>
             <a href="/stocks">Stocks</a>
+            <a href="/admin">Data Entry</a>
         </div>
     </nav>
 
