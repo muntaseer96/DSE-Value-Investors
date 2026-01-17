@@ -65,8 +65,10 @@ def get_portfolio(db: Session = Depends(get_db)):
     holdings_response = []
 
     for holding in holdings:
-        # Calculate total cost
-        holding.total_cost = holding.shares * holding.avg_cost
+        # Calculate total cost (convert Decimal to float for calculations)
+        shares = float(holding.shares) if holding.shares else 0
+        avg_cost = float(holding.avg_cost) if holding.avg_cost else 0
+        holding.total_cost = shares * avg_cost
         total_invested += holding.total_cost
 
         # Get current price
@@ -83,7 +85,7 @@ def get_portfolio(db: Session = Depends(get_db)):
                         continue
 
             if current_price:
-                holding.current_value = holding.shares * current_price
+                holding.current_value = shares * current_price
                 holding.profit_loss = holding.current_value - holding.total_cost
                 holding.profit_loss_pct = (holding.profit_loss / holding.total_cost) * 100 if holding.total_cost else 0
                 current_value += holding.current_value
@@ -91,8 +93,8 @@ def get_portfolio(db: Session = Depends(get_db)):
                 holdings_response.append(HoldingResponse(
                     id=holding.id,
                     stock_symbol=holding.stock_symbol,
-                    shares=holding.shares,
-                    avg_cost=holding.avg_cost,
+                    shares=int(shares),
+                    avg_cost=avg_cost,
                     current_price=current_price,
                     current_value=holding.current_value,
                     total_cost=holding.total_cost,
@@ -105,8 +107,8 @@ def get_portfolio(db: Session = Depends(get_db)):
                 holdings_response.append(HoldingResponse(
                     id=holding.id,
                     stock_symbol=holding.stock_symbol,
-                    shares=holding.shares,
-                    avg_cost=holding.avg_cost,
+                    shares=int(shares),
+                    avg_cost=avg_cost,
                     total_cost=holding.total_cost,
                     notes=holding.notes,
                 ))
@@ -114,8 +116,8 @@ def get_portfolio(db: Session = Depends(get_db)):
             holdings_response.append(HoldingResponse(
                 id=holding.id,
                 stock_symbol=holding.stock_symbol,
-                shares=holding.shares,
-                avg_cost=holding.avg_cost,
+                shares=int(shares),
+                avg_cost=avg_cost,
                 total_cost=holding.total_cost,
                 notes=holding.notes,
             ))
@@ -195,7 +197,10 @@ def update_holding(symbol: str, update: HoldingUpdate, db: Session = Depends(get
     if update.notes is not None:
         holding.notes = update.notes
 
-    holding.total_cost = holding.shares * holding.avg_cost
+    # Convert Decimal to float for calculations
+    shares = float(holding.shares) if holding.shares else 0
+    avg_cost = float(holding.avg_cost) if holding.avg_cost else 0
+    holding.total_cost = shares * avg_cost
 
     db.commit()
     db.refresh(holding)
@@ -203,8 +208,8 @@ def update_holding(symbol: str, update: HoldingUpdate, db: Session = Depends(get
     return HoldingResponse(
         id=holding.id,
         stock_symbol=holding.stock_symbol,
-        shares=holding.shares,
-        avg_cost=holding.avg_cost,
+        shares=int(shares),
+        avg_cost=avg_cost,
         total_cost=holding.total_cost,
         notes=holding.notes,
     )
