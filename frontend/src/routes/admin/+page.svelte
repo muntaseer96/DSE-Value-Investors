@@ -217,7 +217,7 @@
 </script>
 
 <svelte:head>
-    <title>Data Entry - DSE Value Investor</title>
+    <title>Data Entry - Stokr</title>
 </svelte:head>
 
 <div class="admin-page">

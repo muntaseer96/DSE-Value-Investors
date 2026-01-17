@@ -11,14 +11,57 @@
     let limit = 200;
     let viewMode: 'table' | 'grid' = 'table';
 
+    // Sorting
+    type SortKey = 'symbol' | 'ltp' | 'change' | 'change_pct' | 'volume' | 'high' | 'low';
+    let sortKey: SortKey = 'symbol';
+    let sortDirection: 'asc' | 'desc' = 'asc';
+
+    // Filtering
+    type FilterType = 'all' | 'gainers' | 'losers' | 'unchanged';
+    let activeFilter: FilterType = 'all';
+
     // Subscribe to stores
     stocksData.subscribe(v => priceData = v);
     stocksLoading.subscribe(v => loading = v);
     stocksError.subscribe(v => error = v);
 
-    $: filteredStocks = priceData.filter(stock =>
+    // Filter -> Search -> Sort pipeline
+    $: filteredByType = priceData.filter(stock => {
+        if (activeFilter === 'all') return true;
+        if (activeFilter === 'gainers') return (stock.change ?? 0) > 0;
+        if (activeFilter === 'losers') return (stock.change ?? 0) < 0;
+        if (activeFilter === 'unchanged') return (stock.change ?? 0) === 0;
+        return true;
+    });
+
+    $: searchedStocks = filteredByType.filter(stock =>
         stock.symbol?.toLowerCase().includes(searchQuery.toLowerCase())
     );
+
+    $: sortedStocks = [...searchedStocks].sort((a, b) => {
+        let aVal: any = a[sortKey];
+        let bVal: any = b[sortKey];
+
+        // Handle nulls/undefined
+        if (aVal === null || aVal === undefined) aVal = sortDirection === 'asc' ? Infinity : -Infinity;
+        if (bVal === null || bVal === undefined) bVal = sortDirection === 'asc' ? Infinity : -Infinity;
+
+        // String comparison for symbol
+        if (sortKey === 'symbol') {
+            return sortDirection === 'asc'
+                ? String(aVal).localeCompare(String(bVal))
+                : String(bVal).localeCompare(String(aVal));
+        }
+
+        // Numeric comparison for others
+        return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+    });
+
+    // Stats computed from filtered (not searched) data
+    $: totalStocks = priceData.length;
+    $: gainersCount = priceData.filter(s => (s.change ?? 0) > 0).length;
+    $: losersCount = priceData.filter(s => (s.change ?? 0) < 0).length;
+    $: unchangedCount = priceData.filter(s => (s.change ?? 0) === 0).length;
 
     onMount(async () => {
         // Only fetch if not already loaded
@@ -46,6 +89,26 @@
         stocksLoading.set(false);
     }
 
+    function handleSort(key: SortKey) {
+        if (sortKey === key) {
+            sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortKey = key;
+            sortDirection = key === 'symbol' ? 'asc' : 'desc'; // Default desc for numbers
+        }
+    }
+
+    function setFilter(filter: FilterType) {
+        activeFilter = filter;
+    }
+
+    function clearFilters() {
+        activeFilter = 'all';
+        searchQuery = '';
+        sortKey = 'symbol';
+        sortDirection = 'asc';
+    }
+
     function formatPrice(value: number | undefined | null): string {
         if (value === undefined || value === null) return '-';
         return `৳${value.toFixed(2)}`;
@@ -70,14 +133,14 @@
 </script>
 
 <svelte:head>
-    <title>Stocks - DSE Value Investor</title>
+    <title>Stocks - Stokr</title>
 </svelte:head>
 
 <div class="stocks-page">
     <!-- Page Header -->
     <div class="page-header">
         <div class="header-content">
-            <h1>DSE Stocks</h1>
+            <h1>Stocks</h1>
             <p class="header-subtitle">Live prices from Dhaka Stock Exchange</p>
         </div>
         <div class="header-actions">
@@ -120,27 +183,50 @@
             </div>
         </div>
     {:else}
-        <!-- Stats Bar -->
-        <div class="stats-bar animate-fadeIn">
-            <div class="stat-item">
-                <span class="stat-value">{filteredStocks.length}</span>
-                <span class="stat-label">Stocks</span>
+        <!-- Filter Tabs -->
+        <div class="filter-bar animate-fadeIn">
+            <div class="filter-tabs">
+                <button
+                    class="filter-tab"
+                    class:active={activeFilter === 'all'}
+                    on:click={() => setFilter('all')}
+                >
+                    All <span class="filter-count">{totalStocks}</span>
+                </button>
+                <button
+                    class="filter-tab gainers"
+                    class:active={activeFilter === 'gainers'}
+                    on:click={() => setFilter('gainers')}
+                >
+                    Gainers <span class="filter-count positive">{gainersCount}</span>
+                </button>
+                <button
+                    class="filter-tab losers"
+                    class:active={activeFilter === 'losers'}
+                    on:click={() => setFilter('losers')}
+                >
+                    Losers <span class="filter-count negative">{losersCount}</span>
+                </button>
+                <button
+                    class="filter-tab"
+                    class:active={activeFilter === 'unchanged'}
+                    on:click={() => setFilter('unchanged')}
+                >
+                    Unchanged <span class="filter-count">{unchangedCount}</span>
+                </button>
             </div>
-            <div class="stat-divider"></div>
-            <div class="stat-item">
-                <span class="stat-value positive">
-                    {filteredStocks.filter(s => s.change && s.change > 0).length}
-                </span>
-                <span class="stat-label">Gainers</span>
-            </div>
-            <div class="stat-divider"></div>
-            <div class="stat-item">
-                <span class="stat-value negative">
-                    {filteredStocks.filter(s => s.change && s.change < 0).length}
-                </span>
-                <span class="stat-label">Losers</span>
-            </div>
-            <div class="stat-actions">
+
+            {#if activeFilter !== 'all' || searchQuery}
+                <button class="clear-filters-btn" on:click={clearFilters}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                    Clear filters
+                </button>
+            {/if}
+
+            <div class="filter-actions">
                 <div class="view-toggle">
                     <button
                         class="toggle-btn"
@@ -167,16 +253,18 @@
                         </svg>
                     </button>
                 </div>
-                <div class="limit-selector">
-                    <label for="limit-select">Show:</label>
-                    <select id="limit-select" bind:value={limit} on:change={loadPrices}>
-                        <option value={30}>30</option>
-                        <option value={50}>50</option>
-                        <option value={100}>100</option>
-                        <option value={200}>200</option>
-                    </select>
-                </div>
             </div>
+        </div>
+
+        <!-- Results count -->
+        <div class="results-info mt-2">
+            <span class="results-count">Showing {sortedStocks.length} of {totalStocks} stocks</span>
+            {#if sortKey !== 'symbol' || sortDirection !== 'asc'}
+                <span class="sort-indicator">
+                    Sorted by {sortKey === 'change_pct' ? 'change %' : sortKey}
+                    {sortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+            {/if}
         </div>
 
         {#if viewMode === 'table'}
@@ -186,17 +274,59 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Symbol</th>
-                                <th class="text-right">LTP</th>
-                                <th class="text-right">Change</th>
-                                <th class="text-right">High</th>
-                                <th class="text-right">Low</th>
-                                <th class="text-right">Volume</th>
+                                <th>
+                                    <button class="sort-header" on:click={() => handleSort('symbol')}>
+                                        Symbol
+                                        <span class="sort-icon" class:active={sortKey === 'symbol'}>
+                                            {sortKey === 'symbol' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                        </span>
+                                    </button>
+                                </th>
+                                <th class="text-right">
+                                    <button class="sort-header" on:click={() => handleSort('ltp')}>
+                                        LTP
+                                        <span class="sort-icon" class:active={sortKey === 'ltp'}>
+                                            {sortKey === 'ltp' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                        </span>
+                                    </button>
+                                </th>
+                                <th class="text-right">
+                                    <button class="sort-header" on:click={() => handleSort('change_pct')}>
+                                        Change
+                                        <span class="sort-icon" class:active={sortKey === 'change_pct'}>
+                                            {sortKey === 'change_pct' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                        </span>
+                                    </button>
+                                </th>
+                                <th class="text-right">
+                                    <button class="sort-header" on:click={() => handleSort('high')}>
+                                        High
+                                        <span class="sort-icon" class:active={sortKey === 'high'}>
+                                            {sortKey === 'high' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                        </span>
+                                    </button>
+                                </th>
+                                <th class="text-right">
+                                    <button class="sort-header" on:click={() => handleSort('low')}>
+                                        Low
+                                        <span class="sort-icon" class:active={sortKey === 'low'}>
+                                            {sortKey === 'low' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                        </span>
+                                    </button>
+                                </th>
+                                <th class="text-right">
+                                    <button class="sort-header" on:click={() => handleSort('volume')}>
+                                        Volume
+                                        <span class="sort-icon" class:active={sortKey === 'volume'}>
+                                            {sortKey === 'volume' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                        </span>
+                                    </button>
+                                </th>
                                 <th>Action</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {#each filteredStocks as stock, i}
+                            {#each sortedStocks as stock, i}
                                 <tr class="animate-fadeIn" style="animation-delay: {30 + i * 20}ms">
                                     <td>
                                         <a href="/stocks/{stock.symbol}" class="stock-cell">
@@ -237,7 +367,7 @@
                     </table>
                 </div>
 
-                {#if filteredStocks.length === 0}
+                {#if sortedStocks.length === 0}
                     <div class="empty-state">
                         <svg class="empty-state-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                             <circle cx="11" cy="11" r="8"/>
@@ -251,7 +381,7 @@
         {:else}
             <!-- Grid View -->
             <div class="stocks-grid mt-3 animate-fadeIn stagger-2">
-                {#each filteredStocks as stock, i}
+                {#each sortedStocks as stock, i}
                     <a href="/stocks/{stock.symbol}" class="stock-card animate-fadeIn" style="animation-delay: {30 + i * 15}ms">
                         <div class="stock-card-header">
                             <span class="stock-card-symbol">{stock.symbol}</span>
@@ -274,7 +404,7 @@
                 {/each}
             </div>
 
-            {#if filteredStocks.length === 0}
+            {#if sortedStocks.length === 0}
                 <div class="empty-state mt-3">
                     <svg class="empty-state-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                         <circle cx="11" cy="11" r="8"/>
@@ -339,49 +469,151 @@
         padding-left: 2.5rem;
     }
 
-    /* Stats Bar */
-    .stats-bar {
+    /* Filter Bar */
+    .filter-bar {
         display: flex;
         align-items: center;
-        gap: 1.5rem;
-        padding: 1rem 1.5rem;
+        gap: 1rem;
+        padding: 0.75rem 1rem;
         background: var(--bg-card);
         border-radius: var(--radius-lg);
         box-shadow: var(--shadow-card);
         border: 1px solid var(--border-light);
+        flex-wrap: wrap;
     }
 
-    .stat-item {
+    .filter-tabs {
         display: flex;
-        flex-direction: column;
-        gap: 0.125rem;
+        gap: 0.25rem;
+        flex-wrap: wrap;
     }
 
-    .stat-value {
-        font-size: 1.25rem;
-        font-weight: 700;
+    .filter-tab {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        background: transparent;
+        border: none;
+        border-radius: var(--radius-md);
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all var(--duration-fast) var(--ease-out-expo);
+    }
+
+    .filter-tab:hover {
+        background: var(--bg-secondary);
         color: var(--text-primary);
     }
 
-    .stat-label {
+    .filter-tab.active {
+        background: var(--accent-primary);
+        color: white;
+    }
+
+    .filter-tab.active .filter-count {
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+    }
+
+    .filter-count {
+        padding: 0.125rem 0.5rem;
+        background: var(--bg-secondary);
+        border-radius: var(--radius-full);
         font-size: 0.6875rem;
-        font-weight: 600;
+        font-weight: 700;
+    }
+
+    .filter-count.positive {
+        color: var(--success);
+    }
+
+    .filter-count.negative {
+        color: var(--danger);
+    }
+
+    .clear-filters-btn {
+        display: flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.375rem 0.75rem;
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-size: 0.75rem;
+        font-weight: 500;
         color: var(--text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
+        cursor: pointer;
+        transition: all var(--duration-fast) var(--ease-out-expo);
     }
 
-    .stat-divider {
-        width: 1px;
-        height: 32px;
-        background: var(--border);
+    .clear-filters-btn:hover {
+        background: var(--danger);
+        border-color: var(--danger);
+        color: white;
     }
 
-    .stat-actions {
+    .filter-actions {
         display: flex;
         align-items: center;
         gap: 1rem;
         margin-left: auto;
+    }
+
+    /* Results Info */
+    .results-info {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.5rem 0;
+    }
+
+    .results-count {
+        font-size: 0.8125rem;
+        color: var(--text-muted);
+    }
+
+    .sort-indicator {
+        font-size: 0.75rem;
+        color: var(--accent-primary);
+        font-weight: 500;
+    }
+
+    /* Sortable Headers */
+    .sort-header {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        background: none;
+        border: none;
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        cursor: pointer;
+        white-space: nowrap;
+    }
+
+    .sort-header:hover {
+        color: var(--accent-primary);
+    }
+
+    .sort-icon {
+        font-size: 0.75rem;
+        opacity: 0.3;
+        transition: opacity var(--duration-fast) var(--ease-out-expo);
+    }
+
+    .sort-icon.active {
+        opacity: 1;
+        color: var(--accent-primary);
+    }
+
+    .sort-header:hover .sort-icon {
+        opacity: 0.7;
     }
 
     .view-toggle {
@@ -413,24 +645,6 @@
         background: var(--bg-card);
         color: var(--accent-primary);
         box-shadow: var(--shadow-sm);
-    }
-
-    .limit-selector {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    }
-
-    .limit-selector label {
-        margin: 0;
-        font-size: 0.8125rem;
-        color: var(--text-muted);
-    }
-
-    .limit-selector select {
-        width: auto;
-        padding: 0.5rem 2rem 0.5rem 0.75rem;
-        font-size: 0.8125rem;
     }
 
     /* Stocks Card */
@@ -582,21 +796,31 @@
             width: 100%;
         }
 
-        .stats-bar {
-            flex-wrap: wrap;
-            gap: 1rem;
+        .filter-bar {
+            gap: 0.75rem;
         }
 
-        .stat-divider {
-            display: none;
-        }
-
-        .stat-actions {
+        .filter-tabs {
             width: 100%;
-            justify-content: space-between;
+            justify-content: flex-start;
+            overflow-x: auto;
+            padding-bottom: 0.5rem;
+        }
+
+        .filter-tab {
+            padding: 0.375rem 0.75rem;
+            font-size: 0.75rem;
+        }
+
+        .filter-actions {
+            width: 100%;
+            justify-content: flex-end;
             margin-left: 0;
-            padding-top: 1rem;
-            border-top: 1px solid var(--border-light);
+        }
+
+        .results-info {
+            flex-wrap: wrap;
+            gap: 0.5rem;
         }
 
         /* Hide high/low on mobile */
@@ -613,6 +837,15 @@
     }
 
     @media (max-width: 480px) {
+        .filter-tab {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.6875rem;
+        }
+
+        .filter-count {
+            display: none;
+        }
+
         .stocks-grid {
             grid-template-columns: 1fr;
         }

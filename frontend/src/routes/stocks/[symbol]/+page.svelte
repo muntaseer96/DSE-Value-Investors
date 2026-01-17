@@ -82,7 +82,7 @@
 </script>
 
 <svelte:head>
-    <title>{symbol} - DSE Value Investor</title>
+    <title>{symbol} - Stokr</title>
 </svelte:head>
 
 <div class="stock-detail-page">

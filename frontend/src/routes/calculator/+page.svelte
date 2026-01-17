@@ -103,7 +103,7 @@
 </script>
 
 <svelte:head>
-    <title>Calculator - DSE Value Investor</title>
+    <title>Calculator - Stokr</title>
 </svelte:head>
 
 <div class="calculator-page">

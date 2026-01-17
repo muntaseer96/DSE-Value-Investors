@@ -51,7 +51,7 @@
                         <path d="M2 12l10 5 10-5"/>
                     </svg>
                 </span>
-                <span class="brand-text">DSE Investor</span>
+                <span class="brand-text">Stokr</span>
             </a>
         </div>
 
@@ -130,7 +130,7 @@
             </button>
 
             <div class="sidebar-credit">
-                <span class="credit-text">Rule #1 Investing</span>
+                <span class="credit-text">Don't Lose Money</span>
             </div>
         </div>
     </aside>
@@ -160,7 +160,7 @@
                         <path d="M2 12l10 5 10-5"/>
                     </svg>
                 </span>
-                DSE Investor
+                Stokr
             </a>
 
             <button class="theme-toggle-mobile" on:click={toggleTheme} aria-label="Toggle theme">

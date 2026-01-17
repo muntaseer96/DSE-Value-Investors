@@ -66,7 +66,7 @@
 </script>
 
 <svelte:head>
-    <title>Portfolio - DSE Value Investor</title>
+    <title>Portfolio - Stokr</title>
 </svelte:head>
 
 <div class="portfolio-page">
@@ -74,7 +74,7 @@
     <div class="page-header">
         <div class="header-content">
             <h1>My Portfolio</h1>
-            <p class="header-subtitle">Track your DSE investments with Rule #1 methodology</p>
+            <p class="header-subtitle">Track your investments with value investing methodology</p>
         </div>
         <div class="header-actions">
             <button class="btn btn-secondary" on:click={loadPortfolio}>
