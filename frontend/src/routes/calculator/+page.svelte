@@ -2,6 +2,7 @@
     import { onMount } from 'svelte';
     import { page } from '$app/stores';
     import { calculator, type StickerPriceResponse, type BigFiveResponse, type FullAnalysisResponse } from '$lib/api/client';
+    import CalculationBreakdown from '$lib/components/CalculationBreakdown.svelte';
 
     // Form inputs
     let symbol = '';
@@ -280,37 +281,13 @@
                 {/if}
             </div>
 
-            <!-- Calculation Breakdown -->
-            <div class="breakdown-section mt-3">
-                <h3>Calculation Breakdown</h3>
-                <div class="breakdown-grid">
-                    <div class="breakdown-item">
-                        <span class="breakdown-label">Current EPS</span>
-                        <span class="breakdown-value">{formatCurrency(stickerResult.current_eps)}</span>
-                    </div>
-                    <div class="breakdown-item">
-                        <span class="breakdown-label">Historical EPS Growth</span>
-                        <span class="breakdown-value">{formatPercent(stickerResult.eps_growth_rate)}</span>
-                    </div>
-                    <div class="breakdown-item">
-                        <span class="breakdown-label">Used Growth Rate</span>
-                        <span class="breakdown-value highlight">{formatPercent(stickerResult.used_growth_rate)}</span>
-                    </div>
-                    <div class="breakdown-item">
-                        <span class="breakdown-label">Historical PE</span>
-                        <span class="breakdown-value">{stickerResult.historical_pe.toFixed(2)}</span>
-                    </div>
-                    <div class="breakdown-item">
-                        <span class="breakdown-label">Projected EPS (10yr)</span>
-                        <span class="breakdown-value">{formatCurrency(stickerResult.future_eps)}</span>
-                    </div>
-                    <div class="breakdown-item">
-                        <span class="breakdown-label">Future Price (10yr)</span>
-                        <span class="breakdown-value">{formatCurrency(stickerResult.future_price)}</span>
-                    </div>
-                </div>
-            </div>
         </div>
+
+        <!-- Calculation Breakdown Component -->
+        <CalculationBreakdown
+            stickerData={stickerResult}
+            fourMsData={fullAnalysis?.four_ms}
+        />
     {/if}
 
     {#if bigFiveResult}
@@ -380,6 +357,64 @@
             </div>
 
             <div class="four-ms-grid">
+                <!-- Meaning Card -->
+                {#if fullAnalysis.four_ms.meaning}
+                <div class="ms-card meaning-card">
+                    <div class="ms-header">
+                        <h4>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                                <line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                            Meaning
+                        </h4>
+                        <span class="badge grade-{fullAnalysis.four_ms.meaning.grade}">
+                            {fullAnalysis.four_ms.meaning.score.toFixed(0)}
+                        </span>
+                    </div>
+                    <div class="meaning-metrics">
+                        <div class="metric-bar">
+                            <span class="metric-label">Revenue Stability</span>
+                            <div class="bar-container">
+                                <div class="bar-fill" style="width: {Math.min(100, fullAnalysis.four_ms.meaning.revenue_stability)}%"></div>
+                            </div>
+                            <span class="metric-value">{fullAnalysis.four_ms.meaning.revenue_stability.toFixed(0)}%</span>
+                        </div>
+                        <div class="metric-bar">
+                            <span class="metric-label">Earnings Consistency</span>
+                            <div class="bar-container">
+                                <div class="bar-fill" style="width: {Math.min(100, fullAnalysis.four_ms.meaning.earnings_consistency)}%"></div>
+                            </div>
+                            <span class="metric-value">{fullAnalysis.four_ms.meaning.earnings_consistency.toFixed(0)}%</span>
+                        </div>
+                        <div class="metric-bar">
+                            <span class="metric-label">Net Income Stability</span>
+                            <div class="bar-container">
+                                <div class="bar-fill" style="width: {Math.min(100, fullAnalysis.four_ms.meaning.net_income_stability)}%"></div>
+                            </div>
+                            <span class="metric-value">{fullAnalysis.four_ms.meaning.net_income_stability.toFixed(0)}%</span>
+                        </div>
+                        <div class="metric-bar">
+                            <span class="metric-label">Data Quality</span>
+                            <div class="bar-container">
+                                <div class="bar-fill" style="width: {Math.min(100, fullAnalysis.four_ms.meaning.data_quality)}%"></div>
+                            </div>
+                            <span class="metric-value">{fullAnalysis.four_ms.meaning.data_quality.toFixed(0)}%</span>
+                        </div>
+                    </div>
+                    {#if fullAnalysis.four_ms.meaning.sector}
+                        <div class="sector-tag">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                                <polyline points="9 22 9 12 15 12 15 22"/>
+                            </svg>
+                            {fullAnalysis.four_ms.meaning.sector}
+                        </div>
+                    {/if}
+                </div>
+                {/if}
+
                 <div class="ms-card">
                     <div class="ms-header">
                         <h4>
@@ -441,6 +476,21 @@
                     </ul>
                 </div>
             </div>
+
+            <!-- Sector Investment Note -->
+            {#if fullAnalysis.four_ms.meaning?.sector_note}
+                <div class="sector-note-box mt-3">
+                    <div class="sector-note-header">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="16" x2="12" y2="12"/>
+                            <line x1="12" y1="8" x2="12.01" y2="8"/>
+                        </svg>
+                        <span>Sector Insight: {fullAnalysis.four_ms.meaning.sector}</span>
+                    </div>
+                    <p class="sector-note-text">{fullAnalysis.four_ms.meaning.sector_note}</p>
+                </div>
+            {/if}
 
             <div class="recommendation-summary mt-3">
                 <h3>Summary</h3>
@@ -635,50 +685,6 @@
         margin-top: 0.5rem;
     }
 
-    /* Breakdown Section */
-    .breakdown-section {
-        padding-top: 1.5rem;
-        border-top: 1px solid var(--border-light);
-    }
-
-    .breakdown-section h3 {
-        font-family: 'Plus Jakarta Sans', sans-serif;
-        font-size: 0.875rem;
-        font-weight: 600;
-        color: var(--text-secondary);
-        margin-bottom: 1rem;
-    }
-
-    .breakdown-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 1rem;
-    }
-
-    .breakdown-item {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-    }
-
-    .breakdown-label {
-        font-size: 0.6875rem;
-        font-weight: 600;
-        color: var(--text-muted);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-    }
-
-    .breakdown-value {
-        font-size: 1rem;
-        font-weight: 600;
-        color: var(--text-primary);
-    }
-
-    .breakdown-value.highlight {
-        color: var(--accent-primary);
-    }
-
     /* Big Five Grid */
     .big-five-grid {
         display: grid;
@@ -867,6 +873,97 @@
         gap: 0.75rem;
     }
 
+    /* Meaning Card Styles */
+    .meaning-card {
+        grid-column: span 1;
+    }
+
+    .meaning-metrics {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+
+    .metric-bar {
+        display: grid;
+        grid-template-columns: 120px 1fr 40px;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .metric-label {
+        font-size: 0.6875rem;
+        color: var(--text-muted);
+        font-weight: 500;
+    }
+
+    .bar-container {
+        height: 6px;
+        background: var(--bg-tertiary, var(--bg-card));
+        border-radius: 3px;
+        overflow: hidden;
+    }
+
+    .bar-fill {
+        height: 100%;
+        background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary, var(--accent-primary)));
+        border-radius: 3px;
+        transition: width 0.5s var(--ease-out-expo);
+    }
+
+    .metric-value {
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        text-align: right;
+    }
+
+    .sector-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.375rem 0.75rem;
+        background: var(--bg-tertiary, var(--bg-card));
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: var(--accent-primary);
+    }
+
+    .sector-tag svg {
+        opacity: 0.7;
+    }
+
+    /* Sector Note Box */
+    .sector-note-box {
+        padding: 1.25rem;
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.06), rgba(124, 58, 237, 0.06));
+        border: 1px solid rgba(59, 130, 246, 0.15);
+        border-radius: var(--radius-md);
+    }
+
+    .sector-note-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.75rem;
+        font-size: 0.875rem;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .sector-note-header svg {
+        color: var(--info);
+    }
+
+    .sector-note-text {
+        margin: 0;
+        font-size: 0.8125rem;
+        line-height: 1.6;
+        color: var(--text-secondary);
+    }
+
     /* Responsive */
     @media (max-width: 640px) {
         .manual-inputs {
@@ -875,6 +972,15 @@
 
         .breakdown-grid {
             grid-template-columns: repeat(2, 1fr);
+        }
+
+        .metric-bar {
+            grid-template-columns: 1fr 60px;
+        }
+
+        .metric-label {
+            grid-column: span 2;
+            margin-bottom: -0.25rem;
         }
     }
 </style>

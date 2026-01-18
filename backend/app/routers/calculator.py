@@ -50,15 +50,6 @@ class BigFiveResponse(BaseModel):
     free_cf: dict
 
 
-class FourMsRequest(BaseModel):
-    symbol: str
-    meaning_score: Optional[float] = None
-    meaning_notes: Optional[str] = None
-    market_position: Optional[str] = None
-    insider_ownership: Optional[float] = None
-    capital_allocation: Optional[str] = None
-
-
 @router.post("/sticker-price", response_model=StickerPriceResponse)
 def calculate_sticker_price(request: StickerPriceRequest, db: Session = Depends(get_db)):
     """Calculate Sticker Price for a stock.
@@ -234,10 +225,17 @@ def calculate_big_five(symbol: str, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/four-ms")
-def calculate_four_ms(request: FourMsRequest, db: Session = Depends(get_db)):
-    """Calculate 4Ms evaluation for a stock."""
-    symbol = request.symbol.upper()
+@router.get("/four-ms/{symbol}")
+def calculate_four_ms(symbol: str, db: Session = Depends(get_db)):
+    """Calculate 4Ms evaluation for a stock - 100% objective from financial data.
+
+    No user inputs required. All scores are calculated from:
+    - Meaning: Revenue stability, earnings consistency, dividends, data quality
+    - Moat: ROE, gross margins, operating margins
+    - Management: ROE consistency, debt levels, FCF generation, dividends
+    - MOS: Current price vs sticker price
+    """
+    symbol = symbol.upper()
 
     # Get financial data
     financials = db.query(FinancialData).filter(
@@ -250,18 +248,22 @@ def calculate_four_ms(request: FourMsRequest, db: Session = Depends(get_db)):
             detail=f"Insufficient financial data for {symbol}. Run /stocks/{symbol}/fundamentals first."
         )
 
-    # Extract data
+    # Extract all data series for objective evaluation
+    revenue_history = [f.revenue for f in financials if f.revenue]
+    net_income_history = [f.net_income for f in financials if f.net_income]
     roe_history = [f.roe for f in financials if f.roe]
-    de_history = [f.debt_to_equity for f in financials if f.debt_to_equity is not None]
     gross_margin_history = [f.gross_margin for f in financials if f.gross_margin]
+    operating_margin_history = [f.operating_margin for f in financials if f.operating_margin]
+    de_history = [f.debt_to_equity for f in financials if f.debt_to_equity is not None]
+    fcf_history = [f.free_cash_flow for f in financials if f.free_cash_flow]
+    eps_history = [f.eps for f in financials if f.eps]
 
-    # Get current price and sticker price
+    # Get current price
     data_service = DSEDataService()
     price_data = data_service.get_stock_price(symbol)
     current_price = float(price_data.get('ltp', price_data.get('close', 0))) if price_data else 0
 
     # Calculate sticker price
-    eps_history = [f.eps for f in financials if f.eps]
     sticker_calc = StickerPriceCalculator()
 
     if len(eps_history) >= 2:
@@ -277,17 +279,17 @@ def calculate_four_ms(request: FourMsRequest, db: Session = Depends(get_db)):
     else:
         sticker_price = 0
 
-    # Calculate 4Ms
+    # Calculate 4Ms - fully objective
     evaluator = FourMsEvaluator()
     result = evaluator.evaluate(
-        meaning_score=request.meaning_score,
-        meaning_notes=request.meaning_notes,
+        symbol=symbol,
+        revenue_history=revenue_history,
+        net_income_history=net_income_history,
         roe_history=roe_history,
         gross_margin_history=gross_margin_history,
-        market_position=request.market_position,
+        operating_margin_history=operating_margin_history,
         debt_to_equity_history=de_history,
-        insider_ownership=request.insider_ownership,
-        capital_allocation=request.capital_allocation,
+        fcf_history=fcf_history,
         current_price=current_price,
         sticker_price=sticker_price,
     )
@@ -369,12 +371,17 @@ def get_full_analysis(symbol: str, db: Session = Depends(get_db)):
         free_cf_history=[f.free_cash_flow for f in financials if f.free_cash_flow],
     )
 
-    # Calculate 4Ms (with available data)
+    # Calculate 4Ms - fully objective
     evaluator = FourMsEvaluator()
     four_ms_result = evaluator.evaluate(
+        symbol=symbol,
+        revenue_history=[f.revenue for f in financials if f.revenue],
+        net_income_history=[f.net_income for f in financials if f.net_income],
         roe_history=[f.roe for f in financials if f.roe],
         gross_margin_history=[f.gross_margin for f in financials if f.gross_margin],
+        operating_margin_history=[f.operating_margin for f in financials if f.operating_margin],
         debt_to_equity_history=[f.debt_to_equity for f in financials if f.debt_to_equity is not None],
+        fcf_history=[f.free_cash_flow for f in financials if f.free_cash_flow],
         current_price=current_price or 0,
         sticker_price=sticker_result.sticker_price if sticker_result else 0,
     )

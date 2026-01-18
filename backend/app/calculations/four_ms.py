@@ -1,26 +1,36 @@
-"""Four Ms Evaluator - Phil Town's Rule #1 Methodology.
+"""Four Ms Evaluator - Phil Town's Rule #1 Methodology (Fully Objective).
 
 The Four Ms framework for evaluating a business:
-1. Meaning - Do I understand and believe in the business?
-2. Moat - Does it have a sustainable competitive advantage?
-3. Management - Is management owner-oriented and capable?
-4. Margin of Safety - Is the stock priced below intrinsic value?
+1. Meaning - Business predictability based on historical data patterns
+2. Moat - Sustainable competitive advantage from financial metrics
+3. Management - Owner-oriented management from capital allocation patterns
+4. Margin of Safety - Price vs intrinsic value
 
-Meaning is subjective (user input).
-Moat, Management, and Margin of Safety can be partially calculated from financials.
+ALL metrics are now calculated objectively from financial data.
+No subjective user inputs required.
 """
 from dataclasses import dataclass
 from typing import Optional, List, Dict
+from .sectors import get_sector, get_sector_profile, get_sector_note
 
 
 @dataclass
-class MoatScore:
-    """Moat evaluation - competitive advantage indicators."""
-    roe_avg: float  # Average ROE over 5 years
-    roe_consistent: bool  # ROE > 15% for most years
-    gross_margin_avg: float
-    gross_margin_stable: bool  # Not declining
-    market_position: Optional[str]  # User input: "Leader", "Strong", "Average", "Weak"
+class MeaningScore:
+    """Meaning evaluation - Business predictability and understandability.
+
+    Calculated from:
+    - Revenue stability (low volatility = more predictable)
+    - Earnings consistency (profitable years)
+    - Net income stability (low volatility = predictable earnings)
+    - Data quality (years of data available)
+    """
+    revenue_stability: float  # 0-100, higher = more stable
+    earnings_consistency: float  # Percentage of profitable years
+    net_income_stability: float  # 0-100, higher = more stable earnings
+    data_quality: float  # 0-100, based on years of data
+
+    sector: Optional[str]  # Stock's sector
+    sector_note: Optional[str]  # Bangladesh-specific sector context
 
     score: float  # 0-100
     grade: str  # A, B, C, D, F
@@ -28,11 +38,12 @@ class MoatScore:
 
     def to_dict(self):
         return {
-            "roe_avg": round(self.roe_avg, 2),
-            "roe_consistent": self.roe_consistent,
-            "gross_margin_avg": round(self.gross_margin_avg, 2),
-            "gross_margin_stable": self.gross_margin_stable,
-            "market_position": self.market_position,
+            "revenue_stability": round(self.revenue_stability, 1),
+            "earnings_consistency": round(self.earnings_consistency, 1),
+            "net_income_stability": round(self.net_income_stability, 1),
+            "data_quality": round(self.data_quality, 1),
+            "sector": self.sector,
+            "sector_note": self.sector_note,
             "score": round(self.score, 1),
             "grade": self.grade,
             "notes": self.notes,
@@ -40,28 +51,72 @@ class MoatScore:
 
 
 @dataclass
+class MoatScore:
+    """Moat evaluation - competitive advantage indicators.
+
+    Calculated from (100% objective):
+    - ROE level and consistency
+    - Gross margin level and trend
+    - Operating margin level
+    """
+    roe_avg: float  # Average ROE over available years
+    roe_consistent: bool  # ROE > 15% for most years
+    gross_margin_avg: float
+    gross_margin_trend: str  # "Growing", "Stable", "Declining"
+    operating_margin_avg: float
+
+    score: float  # 0-100
+    grade: str  # A, B, C, D, F
+    notes: List[str]
+
+    # Score breakdown for transparency
+    score_breakdown: Dict[str, float]
+
+    def to_dict(self):
+        return {
+            "roe_avg": round(self.roe_avg, 2),
+            "roe_consistent": self.roe_consistent,
+            "gross_margin_avg": round(self.gross_margin_avg, 2),
+            "gross_margin_trend": self.gross_margin_trend,
+            "operating_margin_avg": round(self.operating_margin_avg, 2),
+            "score": round(self.score, 1),
+            "grade": self.grade,
+            "notes": self.notes,
+            "score_breakdown": {k: round(v, 1) for k, v in self.score_breakdown.items()},
+        }
+
+
+@dataclass
 class ManagementScore:
-    """Management evaluation - owner-orientation indicators."""
+    """Management evaluation - owner-orientation indicators.
+
+    Calculated from (100% objective):
+    - ROE consistency (good capital allocation)
+    - Debt levels (financial prudence)
+    - FCF/Net Income ratio (earnings quality)
+    """
     roe_above_15: bool  # Consistent ROE > 15%
     debt_to_equity: float  # Lower is better
     debt_reasonable: bool  # D/E < 0.5 is good
-    insider_ownership: Optional[float]  # User input
-    capital_allocation: Optional[str]  # User input
+    fcf_to_ni_ratio: float  # FCF / Net Income, higher = quality earnings
 
     score: float  # 0-100
     grade: str
     notes: List[str]
+
+    # Score breakdown for transparency
+    score_breakdown: Dict[str, float]
 
     def to_dict(self):
         return {
             "roe_above_15": self.roe_above_15,
             "debt_to_equity": round(self.debt_to_equity, 2) if self.debt_to_equity else None,
             "debt_reasonable": self.debt_reasonable,
-            "insider_ownership": self.insider_ownership,
-            "capital_allocation": self.capital_allocation,
+            "fcf_to_ni_ratio": round(self.fcf_to_ni_ratio, 2) if self.fcf_to_ni_ratio else None,
             "score": round(self.score, 1),
             "grade": self.grade,
             "notes": self.notes,
+            "score_breakdown": {k: round(v, 1) for k, v in self.score_breakdown.items()},
         }
 
 
@@ -94,9 +149,7 @@ class MOSScore:
 @dataclass
 class FourMsResult:
     """Complete Four Ms evaluation result."""
-    meaning_score: Optional[float]  # User-provided 0-100
-    meaning_notes: Optional[str]
-
+    meaning: MeaningScore  # Now calculated, not user input
     moat: MoatScore
     management: ManagementScore
     mos: MOSScore
@@ -108,8 +161,7 @@ class FourMsResult:
 
     def to_dict(self):
         return {
-            "meaning_score": self.meaning_score,
-            "meaning_notes": self.meaning_notes,
+            "meaning": self.meaning.to_dict(),
             "moat": self.moat.to_dict(),
             "management": self.management.to_dict(),
             "mos": self.mos.to_dict(),
@@ -120,13 +172,39 @@ class FourMsResult:
         }
 
 
+def _score_to_grade(score: float) -> str:
+    """Convert numeric score to letter grade."""
+    if score >= 85:
+        return "A"
+    elif score >= 70:
+        return "B"
+    elif score >= 55:
+        return "C"
+    elif score >= 40:
+        return "D"
+    else:
+        return "F"
+
+
 class FourMsEvaluator:
-    """Evaluate a stock using the Four Ms framework."""
+    """Evaluate a stock using the Four Ms framework - Fully Objective."""
 
     def _calculate_average(self, values: List[float]) -> float:
         """Calculate average of non-None, non-zero values."""
         valid = [v for v in values if v is not None and v != 0]
         return sum(valid) / len(valid) if valid else 0.0
+
+    def _calculate_cv(self, values: List[float]) -> float:
+        """Calculate coefficient of variation (lower = more stable)."""
+        valid = [v for v in values if v is not None and v > 0]
+        if len(valid) < 2:
+            return 100.0  # High CV if insufficient data
+        mean = sum(valid) / len(valid)
+        if mean == 0:
+            return 100.0
+        variance = sum((x - mean) ** 2 for x in valid) / len(valid)
+        std = variance ** 0.5
+        return (std / mean) * 100
 
     def _is_consistent(self, values: List[float], threshold: float) -> bool:
         """Check if most values meet the threshold."""
@@ -136,206 +214,365 @@ class FourMsEvaluator:
         passing = sum(1 for v in valid if v >= threshold)
         return passing >= len(valid) * 0.6  # 60% must pass
 
-    def _is_stable_or_growing(self, values: List[float]) -> bool:
-        """Check if values are stable or growing (not declining)."""
+    def _get_trend(self, values: List[float]) -> str:
+        """Determine if values are growing, stable, or declining."""
         valid = [v for v in values if v is not None]
-        if len(valid) < 2:
-            return True
-        # Check if trend is not significantly declining
-        first_half = valid[:len(valid)//2]
-        second_half = valid[len(valid)//2:]
-        avg_first = sum(first_half) / len(first_half) if first_half else 0
-        avg_second = sum(second_half) / len(second_half) if second_half else 0
-        # Allow up to 10% decline
-        return avg_second >= avg_first * 0.9
+        if len(valid) < 3:
+            return "Stable"
+
+        # Compare first third to last third
+        n = len(valid)
+        first_third = valid[:n//3] if n >= 3 else valid[:1]
+        last_third = valid[-n//3:] if n >= 3 else valid[-1:]
+
+        avg_first = sum(first_third) / len(first_third) if first_third else 0
+        avg_last = sum(last_third) / len(last_third) if last_third else 0
+
+        if avg_first == 0:
+            return "Stable"
+
+        change_pct = ((avg_last - avg_first) / abs(avg_first)) * 100
+
+        if change_pct > 10:
+            return "Growing"
+        elif change_pct < -10:
+            return "Declining"
+        else:
+            return "Stable"
+
+    def _calculate_profitable_years_pct(self, net_income_history: List[float]) -> float:
+        """Calculate percentage of profitable years."""
+        valid = [v for v in net_income_history if v is not None]
+        if not valid:
+            return 0.0
+        profitable = sum(1 for v in valid if v > 0)
+        return (profitable / len(valid)) * 100
+
+    def evaluate_meaning(
+        self,
+        symbol: str,
+        revenue_history: List[float],
+        net_income_history: List[float],
+    ) -> MeaningScore:
+        """Evaluate business meaning/predictability from data patterns.
+
+        Scoring breakdown (100 points total):
+        - Revenue Stability (25): Low volatility = predictable business
+        - Earnings Consistency (25): % of profitable years
+        - Net Income Stability (25): Low volatility = predictable earnings
+        - Data Quality (25): Years of data available
+        """
+        notes = []
+        score_breakdown = {}
+
+        # Get sector information
+        sector = get_sector(symbol)
+        sector_profile = get_sector_profile(symbol)
+        sector_note = get_sector_note(symbol)
+        sector_name = sector_profile.display_name if sector_profile else None
+
+        # 1. Revenue Stability (25 points) - Lower CV = more stable
+        revenue_cv = self._calculate_cv(revenue_history)
+        if revenue_cv < 15:
+            stability_score = 25
+            notes.append("Highly stable revenue - predictable business")
+        elif revenue_cv < 25:
+            stability_score = 20
+            notes.append("Stable revenue stream")
+        elif revenue_cv < 40:
+            stability_score = 15
+            notes.append("Moderate revenue volatility")
+        elif revenue_cv < 60:
+            stability_score = 10
+            notes.append("Revenue shows significant volatility")
+        else:
+            stability_score = 5
+            notes.append("Highly volatile revenue - harder to predict")
+
+        # Convert to 0-100 scale for display
+        revenue_stability = 100 - min(100, revenue_cv)  # Higher = more stable
+        score_breakdown["Revenue Stability"] = stability_score
+
+        # 2. Earnings Consistency (25 points) - % of profitable years
+        earnings_pct = self._calculate_profitable_years_pct(net_income_history)
+        if earnings_pct >= 100:
+            earnings_score = 25
+            notes.append("Profitable every year - strong earnings quality")
+        elif earnings_pct >= 80:
+            earnings_score = 20
+            notes.append("Profitable most years")
+        elif earnings_pct >= 60:
+            earnings_score = 15
+        elif earnings_pct >= 40:
+            earnings_score = 10
+            notes.append("Inconsistent profitability")
+        else:
+            earnings_score = 5
+            notes.append("Frequently unprofitable - high risk")
+
+        score_breakdown["Earnings Consistency"] = earnings_score
+
+        # 3. Net Income Stability (25 points) - Lower CV = more predictable
+        # Only consider positive earnings for stability calculation
+        positive_ni = [v for v in net_income_history if v is not None and v > 0]
+        ni_cv = self._calculate_cv(positive_ni) if positive_ni else 100
+        if ni_cv < 20:
+            ni_stability_score = 25
+            notes.append("Highly predictable earnings")
+        elif ni_cv < 35:
+            ni_stability_score = 20
+            notes.append("Stable earnings pattern")
+        elif ni_cv < 50:
+            ni_stability_score = 15
+        elif ni_cv < 70:
+            ni_stability_score = 10
+            notes.append("Volatile earnings - harder to predict")
+        else:
+            ni_stability_score = 5
+            notes.append("Highly volatile earnings")
+
+        net_income_stability = 100 - min(100, ni_cv)  # Higher = more stable
+        score_breakdown["Net Income Stability"] = ni_stability_score
+
+        # 4. Data Quality (25 points) - Years of data
+        years_of_data = max(
+            len([v for v in revenue_history if v is not None]),
+            len([v for v in net_income_history if v is not None])
+        )
+        if years_of_data >= 10:
+            data_score = 25
+        elif years_of_data >= 7:
+            data_score = 20
+        elif years_of_data >= 5:
+            data_score = 15
+            notes.append(f"Limited history ({years_of_data} years)")
+        elif years_of_data >= 3:
+            data_score = 10
+            notes.append(f"Short history ({years_of_data} years) - less certainty")
+        else:
+            data_score = 5
+            notes.append("Insufficient data for confident analysis")
+
+        data_quality = (years_of_data / 10) * 100  # 10 years = 100%
+        score_breakdown["Data Quality"] = data_score
+
+        # Add sector context
+        if sector_name:
+            notes.append(f"Sector: {sector_name}")
+
+        # Calculate total score
+        total_score = stability_score + earnings_score + ni_stability_score + data_score
+
+        return MeaningScore(
+            revenue_stability=revenue_stability,
+            earnings_consistency=earnings_pct,
+            net_income_stability=net_income_stability,
+            data_quality=min(100, data_quality),
+            sector=sector_name,
+            sector_note=sector_note,
+            score=total_score,
+            grade=_score_to_grade(total_score),
+            notes=notes,
+        )
 
     def evaluate_moat(
         self,
         roe_history: List[float],
         gross_margin_history: List[float],
-        market_position: Optional[str] = None,
+        operating_margin_history: List[float],
     ) -> MoatScore:
-        """Evaluate competitive moat.
+        """Evaluate competitive moat - 100% objective.
 
-        Args:
-            roe_history: ROE values (oldest first)
-            gross_margin_history: Gross margin values (oldest first)
-            market_position: User assessment of market position
-
-        Returns:
-            MoatScore
+        Scoring breakdown (100 points total):
+        - ROE Level (30): Average ROE scoring
+        - ROE Consistency (20): Consistent > 15%
+        - Gross Margin Level (20): Pricing power indicator
+        - Gross Margin Trend (15): Growing/stable/declining
+        - Operating Margin (15): Operational efficiency
         """
         notes = []
+        score_breakdown = {}
 
-        # ROE analysis
+        # 1. ROE Level (30 points)
         roe_avg = self._calculate_average(roe_history)
-        roe_consistent = self._is_consistent(roe_history, 15.0)
-
         if roe_avg >= 20:
+            roe_level_score = 30
             notes.append(f"Excellent ROE of {roe_avg:.1f}% indicates strong moat")
         elif roe_avg >= 15:
+            roe_level_score = 24
             notes.append(f"Good ROE of {roe_avg:.1f}% suggests competitive advantage")
-        else:
-            notes.append(f"ROE of {roe_avg:.1f}% is below the 15% threshold")
-
-        # Gross margin analysis
-        gross_margin_avg = self._calculate_average(gross_margin_history)
-        gross_margin_stable = self._is_stable_or_growing(gross_margin_history)
-
-        if gross_margin_avg >= 40:
-            notes.append("High gross margins indicate pricing power")
-        elif not gross_margin_stable:
-            notes.append("Declining gross margins may indicate weakening moat")
-
-        # Calculate score
-        score = 0
-        # ROE contribution (40 points max)
-        if roe_avg >= 20:
-            score += 40
-        elif roe_avg >= 15:
-            score += 30
         elif roe_avg >= 10:
-            score += 20
+            roe_level_score = 18
+            notes.append(f"Moderate ROE of {roe_avg:.1f}%")
+        elif roe_avg >= 5:
+            roe_level_score = 12
+            notes.append(f"Below-average ROE of {roe_avg:.1f}%")
         else:
-            score += 10
+            roe_level_score = 6
+            notes.append(f"Weak ROE of {roe_avg:.1f}% - no evident moat")
+        score_breakdown["ROE Level"] = roe_level_score
 
-        # ROE consistency (20 points)
+        # 2. ROE Consistency (20 points)
+        roe_consistent = self._is_consistent(roe_history, 15.0)
         if roe_consistent:
-            score += 20
-
-        # Gross margin (20 points)
-        if gross_margin_avg >= 40:
-            score += 20
-        elif gross_margin_avg >= 30:
-            score += 15
-        elif gross_margin_avg >= 20:
-            score += 10
-
-        # Gross margin stability (10 points)
-        if gross_margin_stable:
-            score += 10
-
-        # Market position (10 points)
-        position_scores = {"Leader": 10, "Strong": 7, "Average": 4, "Weak": 0}
-        score += position_scores.get(market_position, 5)
-
-        # Determine grade
-        if score >= 85:
-            grade = "A"
-        elif score >= 70:
-            grade = "B"
-        elif score >= 55:
-            grade = "C"
-        elif score >= 40:
-            grade = "D"
+            roe_consistency_score = 20
+            notes.append("Consistent ROE > 15% shows durable advantage")
+        elif self._is_consistent(roe_history, 10.0):
+            roe_consistency_score = 12
         else:
-            grade = "F"
+            roe_consistency_score = 6
+        score_breakdown["ROE Consistency"] = roe_consistency_score
+
+        # 3. Gross Margin Level (20 points)
+        gross_margin_avg = self._calculate_average(gross_margin_history)
+        if gross_margin_avg >= 40:
+            gm_level_score = 20
+            notes.append("High gross margins indicate pricing power")
+        elif gross_margin_avg >= 30:
+            gm_level_score = 15
+        elif gross_margin_avg >= 20:
+            gm_level_score = 10
+        elif gross_margin_avg >= 10:
+            gm_level_score = 6
+        else:
+            gm_level_score = 3
+        score_breakdown["Gross Margin Level"] = gm_level_score
+
+        # 4. Gross Margin Trend (15 points)
+        gross_margin_trend = self._get_trend(gross_margin_history)
+        if gross_margin_trend == "Growing":
+            gm_trend_score = 15
+            notes.append("Expanding gross margins - strengthening moat")
+        elif gross_margin_trend == "Stable":
+            gm_trend_score = 10
+        else:
+            gm_trend_score = 5
+            notes.append("Declining gross margins - potential moat erosion")
+        score_breakdown["Gross Margin Trend"] = gm_trend_score
+
+        # 5. Operating Margin (15 points)
+        operating_margin_avg = self._calculate_average(operating_margin_history)
+        if operating_margin_avg >= 25:
+            om_score = 15
+            notes.append("Excellent operating efficiency")
+        elif operating_margin_avg >= 15:
+            om_score = 12
+        elif operating_margin_avg >= 10:
+            om_score = 8
+        elif operating_margin_avg >= 5:
+            om_score = 5
+        else:
+            om_score = 2
+        score_breakdown["Operating Margin"] = om_score
+
+        # Calculate total score
+        total_score = (
+            roe_level_score + roe_consistency_score +
+            gm_level_score + gm_trend_score + om_score
+        )
 
         return MoatScore(
             roe_avg=roe_avg,
             roe_consistent=roe_consistent,
             gross_margin_avg=gross_margin_avg,
-            gross_margin_stable=gross_margin_stable,
-            market_position=market_position,
-            score=score,
-            grade=grade,
+            gross_margin_trend=gross_margin_trend,
+            operating_margin_avg=operating_margin_avg,
+            score=total_score,
+            grade=_score_to_grade(total_score),
             notes=notes,
+            score_breakdown=score_breakdown,
         )
 
     def evaluate_management(
         self,
         roe_history: List[float],
         debt_to_equity_history: List[float],
-        insider_ownership: Optional[float] = None,
-        capital_allocation: Optional[str] = None,
+        fcf_history: List[float],
+        net_income_history: List[float],
     ) -> ManagementScore:
-        """Evaluate management quality.
+        """Evaluate management quality - 100% objective.
 
-        Args:
-            roe_history: ROE values (oldest first)
-            debt_to_equity_history: D/E ratio values (oldest first)
-            insider_ownership: Percentage of insider ownership
-            capital_allocation: User assessment ("Excellent", "Good", "Average", "Poor")
-
-        Returns:
-            ManagementScore
+        Scoring breakdown (100 points total):
+        - ROE Consistency (34): Good capital allocation
+        - Debt Levels (33): Financial prudence
+        - FCF/NI Ratio (33): Earnings quality
         """
         notes = []
+        score_breakdown = {}
 
-        # ROE analysis
+        # 1. ROE Consistency (34 points)
         roe_above_15 = self._is_consistent(roe_history, 15.0)
-        if roe_above_15:
-            notes.append("Consistent ROE > 15% shows good capital allocation")
+        roe_avg = self._calculate_average(roe_history)
 
-        # Debt analysis
+        if roe_above_15:
+            roe_score = 34
+            notes.append("Consistent ROE > 15% shows good capital allocation")
+        elif self._is_consistent(roe_history, 10.0):
+            roe_score = 24
+        elif roe_avg >= 10:
+            roe_score = 16
+        else:
+            roe_score = 8
+        score_breakdown["ROE Consistency"] = roe_score
+
+        # 2. Debt Levels (33 points)
         de_avg = self._calculate_average(debt_to_equity_history)
         debt_reasonable = de_avg < 0.5 if de_avg else True
 
         if de_avg < 0.3:
+            debt_score = 33
             notes.append("Very low debt provides financial flexibility")
         elif de_avg < 0.5:
-            notes.append("Reasonable debt levels")
+            debt_score = 26
+            notes.append("Conservative debt levels")
         elif de_avg < 1.0:
+            debt_score = 18
             notes.append("Moderate debt - monitor carefully")
+        elif de_avg < 2.0:
+            debt_score = 10
+            notes.append("Elevated debt levels")
         else:
-            notes.append("High debt levels are a concern")
+            debt_score = 5
+            notes.append("High debt is a concern")
+        score_breakdown["Debt Management"] = debt_score
 
-        # Calculate score
-        score = 0
+        # 3. FCF/Net Income Ratio (33 points) - Earnings quality
+        fcf_avg = self._calculate_average(fcf_history)
+        ni_avg = self._calculate_average(net_income_history)
 
-        # ROE > 15% consistently (30 points)
-        if roe_above_15:
-            score += 30
-        elif self._calculate_average(roe_history) >= 10:
-            score += 15
-
-        # Debt levels (30 points)
-        if de_avg < 0.3:
-            score += 30
-        elif de_avg < 0.5:
-            score += 25
-        elif de_avg < 1.0:
-            score += 15
+        if ni_avg > 0:
+            fcf_ni_ratio = fcf_avg / ni_avg if ni_avg != 0 else 0
         else:
-            score += 5
+            fcf_ni_ratio = 0
 
-        # Insider ownership (20 points)
-        if insider_ownership is not None:
-            if insider_ownership >= 20:
-                score += 20
-                notes.append(f"High insider ownership ({insider_ownership:.1f}%) aligns interests")
-            elif insider_ownership >= 10:
-                score += 15
-            elif insider_ownership >= 5:
-                score += 10
+        if fcf_ni_ratio >= 1.0:
+            fcf_score = 33
+            notes.append("FCF exceeds net income - high quality earnings")
+        elif fcf_ni_ratio >= 0.8:
+            fcf_score = 26
+            notes.append("Strong free cash flow generation")
+        elif fcf_ni_ratio >= 0.5:
+            fcf_score = 18
+        elif fcf_ni_ratio >= 0.2:
+            fcf_score = 10
+            notes.append("Weak cash conversion")
         else:
-            score += 10  # Neutral if unknown
+            fcf_score = 5
+            notes.append("Poor cash generation vs earnings")
+        score_breakdown["Cash Generation"] = fcf_score
 
-        # Capital allocation (20 points)
-        allocation_scores = {"Excellent": 20, "Good": 15, "Average": 10, "Poor": 0}
-        score += allocation_scores.get(capital_allocation, 10)
-
-        # Determine grade
-        if score >= 85:
-            grade = "A"
-        elif score >= 70:
-            grade = "B"
-        elif score >= 55:
-            grade = "C"
-        elif score >= 40:
-            grade = "D"
-        else:
-            grade = "F"
+        # Calculate total score
+        total_score = roe_score + debt_score + fcf_score
 
         return ManagementScore(
             roe_above_15=roe_above_15,
             debt_to_equity=de_avg,
             debt_reasonable=debt_reasonable,
-            insider_ownership=insider_ownership,
-            capital_allocation=capital_allocation,
-            score=score,
-            grade=grade,
+            fcf_to_ni_ratio=fcf_ni_ratio,
+            score=total_score,
+            grade=_score_to_grade(total_score),
             notes=notes,
+            score_breakdown=score_breakdown,
         )
 
     def evaluate_mos(
@@ -343,15 +580,7 @@ class FourMsEvaluator:
         current_price: float,
         sticker_price: float,
     ) -> MOSScore:
-        """Evaluate Margin of Safety.
-
-        Args:
-            current_price: Current stock price
-            sticker_price: Calculated sticker price
-
-        Returns:
-            MOSScore
-        """
+        """Evaluate Margin of Safety."""
         notes = []
         mos = sticker_price * 0.5  # 50% margin of safety
 
@@ -369,7 +598,10 @@ class FourMsEvaluator:
             notes.append("Trading below Margin of Safety - maximum safety")
         elif current_price < sticker_price:
             # Scale score from 50-90 based on discount
-            discount_ratio = (sticker_price - current_price) / (sticker_price - mos)
+            if sticker_price > mos:
+                discount_ratio = (sticker_price - current_price) / (sticker_price - mos)
+            else:
+                discount_ratio = 0.5
             score = 50 + (discount_ratio * 40)
             recommendation = "BUY"
             notes.append(f"Price is {discount_pct:.1f}% below Sticker Price - good value")
@@ -386,84 +618,73 @@ class FourMsEvaluator:
             recommendation = "SELL"
             notes.append("Significantly overvalued - consider selling")
 
-        # Determine grade
-        if score >= 85:
-            grade = "A"
-        elif score >= 70:
-            grade = "B"
-        elif score >= 50:
-            grade = "C"
-        elif score >= 30:
-            grade = "D"
-        else:
-            grade = "F"
-
         return MOSScore(
             current_price=current_price,
             sticker_price=sticker_price,
             margin_of_safety=mos,
             discount_pct=discount_pct,
             score=score,
-            grade=grade,
+            grade=_score_to_grade(score),
             recommendation=recommendation,
             notes=notes,
         )
 
     def evaluate(
         self,
-        # Meaning (user input)
-        meaning_score: Optional[float] = None,
-        meaning_notes: Optional[str] = None,
-        # Moat
+        symbol: str,
+        # Meaning data
+        revenue_history: List[float] = None,
+        net_income_history: List[float] = None,
+        # Moat data
         roe_history: List[float] = None,
         gross_margin_history: List[float] = None,
-        market_position: Optional[str] = None,
-        # Management
+        operating_margin_history: List[float] = None,
+        # Management data
         debt_to_equity_history: List[float] = None,
-        insider_ownership: Optional[float] = None,
-        capital_allocation: Optional[str] = None,
+        fcf_history: List[float] = None,
         # Margin of Safety
         current_price: float = 0,
         sticker_price: float = 0,
     ) -> FourMsResult:
-        """Complete Four Ms evaluation.
+        """Complete Four Ms evaluation - 100% objective.
 
-        Returns:
-            FourMsResult with all evaluations
+        Weights:
+        - Meaning: 20%
+        - Moat: 30%
+        - Management: 20%
+        - MOS: 30%
         """
         # Default empty lists
+        revenue_history = revenue_history or []
+        net_income_history = net_income_history or []
         roe_history = roe_history or []
         gross_margin_history = gross_margin_history or []
+        operating_margin_history = operating_margin_history or []
         debt_to_equity_history = debt_to_equity_history or []
+        fcf_history = fcf_history or []
 
         # Evaluate each M
-        moat = self.evaluate_moat(roe_history, gross_margin_history, market_position)
+        meaning = self.evaluate_meaning(
+            symbol, revenue_history, net_income_history
+        )
+        moat = self.evaluate_moat(
+            roe_history, gross_margin_history, operating_margin_history
+        )
         management = self.evaluate_management(
-            roe_history, debt_to_equity_history, insider_ownership, capital_allocation
+            roe_history, debt_to_equity_history, fcf_history, net_income_history
         )
         mos = self.evaluate_mos(current_price, sticker_price)
 
         # Calculate overall score (weighted average)
         # Meaning: 20%, Moat: 30%, Management: 20%, MOS: 30%
-        meaning = meaning_score if meaning_score is not None else 50  # Neutral if not provided
         overall_score = (
-            meaning * 0.20 +
+            meaning.score * 0.20 +
             moat.score * 0.30 +
             management.score * 0.20 +
             mos.score * 0.30
         )
 
-        # Determine overall grade
-        if overall_score >= 85:
-            overall_grade = "A"
-        elif overall_score >= 70:
-            overall_grade = "B"
-        elif overall_score >= 55:
-            overall_grade = "C"
-        elif overall_score >= 40:
-            overall_grade = "D"
-        else:
-            overall_grade = "F"
+        overall_grade = _score_to_grade(overall_score)
 
         # Generate summary
         summary = []
@@ -474,9 +695,15 @@ class FourMsEvaluator:
         else:
             summary.append("This company may not meet Rule #1 criteria")
 
-        summary.extend(moat.notes[:1])  # Add top moat note
-        summary.extend(management.notes[:1])  # Add top management note
-        summary.extend(mos.notes[:1])  # Add top MOS note
+        # Add key notes from each M
+        if meaning.notes:
+            summary.append(meaning.notes[0])
+        if moat.notes:
+            summary.append(moat.notes[0])
+        if management.notes:
+            summary.append(management.notes[0])
+        if mos.notes:
+            summary.append(mos.notes[0])
 
         # Final recommendation based on MOS and overall score
         if mos.recommendation in ["STRONG_BUY", "BUY"] and overall_score >= 60:
@@ -487,8 +714,7 @@ class FourMsEvaluator:
             recommendation = "HOLD"
 
         return FourMsResult(
-            meaning_score=meaning_score,
-            meaning_notes=meaning_notes,
+            meaning=meaning,
             moat=moat,
             management=management,
             mos=mos,

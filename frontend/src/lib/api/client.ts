@@ -76,10 +76,7 @@ export const calculator = {
     }),
     getStickerPrice: (symbol: string) => request<StickerPriceResponse>(`/calculate/sticker-price/${symbol}`),
     getBigFive: (symbol: string) => request<BigFiveResponse>(`/calculate/big-five/${symbol}`),
-    getFourMs: (data: FourMsRequest) => request<FourMsResponse>('/calculate/four-ms', {
-        method: 'POST',
-        body: JSON.stringify(data),
-    }),
+    getFourMs: (symbol: string) => request<FourMsResponse>(`/calculate/four-ms/${symbol}`),
     getFullAnalysis: (symbol: string) => request<FullAnalysisResponse>(`/calculate/analysis/${symbol}`),
 };
 
@@ -196,18 +193,8 @@ export interface GrowthMetric {
     status: string;
 }
 
-export interface FourMsRequest {
-    symbol: string;
-    meaning_score?: number;
-    meaning_notes?: string;
-    market_position?: string;
-    insider_ownership?: number;
-    capital_allocation?: string;
-}
-
 export interface FourMsResponse {
-    meaning_score?: number;
-    meaning_notes?: string;
+    meaning: MeaningScore;
     moat: MoatScore;
     management: ManagementScore;
     mos: MOSScore;
@@ -217,26 +204,39 @@ export interface FourMsResponse {
     summary: string[];
 }
 
+export interface MeaningScore {
+    revenue_stability: number;
+    earnings_consistency: number;
+    net_income_stability: number;
+    data_quality: number;
+    sector?: string;
+    sector_note?: string;
+    score: number;
+    grade: string;
+    notes: string[];
+}
+
 export interface MoatScore {
     roe_avg: number;
     roe_consistent: boolean;
     gross_margin_avg: number;
-    gross_margin_stable: boolean;
-    market_position?: string;
+    gross_margin_trend: string;
+    operating_margin_avg: number;
     score: number;
     grade: string;
     notes: string[];
+    score_breakdown: Record<string, number>;
 }
 
 export interface ManagementScore {
     roe_above_15: boolean;
     debt_to_equity?: number;
     debt_reasonable: boolean;
-    insider_ownership?: number;
-    capital_allocation?: string;
+    fcf_to_ni_ratio?: number;
     score: number;
     grade: string;
     notes: string[];
+    score_breakdown: Record<string, number>;
 }
 
 export interface MOSScore {
