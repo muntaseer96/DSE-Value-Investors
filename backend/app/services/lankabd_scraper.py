@@ -29,24 +29,49 @@ class LankaBDScraper:
         "Total Shareholders' Equity": "total_equity",
         "Shareholders' Equity:": "total_equity",
         "Shareholders' Equity": "total_equity",
+        "Total Shareloders' Equity": "total_equity",  # typo on BPML, HAKKANIPUL
+        "Equity attributable to the Company's equity holders": "total_equity",  # BSC
+        "Equity attributable to the Company's equity holders:": "total_equity",  # BSC with colon
+        "Equity attributable to the Company\"s equity holders": "total_equity",  # BSC variant
+        "Equity attributable to the Company\"s equity holders:": "total_equity",  # BSC variant with colon
+        "Equity attributable to": "total_equity",  # partial match fallback
+        # Simple "Total Equity" variations (GP, ROBI, TITASGAS, UPGDCL, CROWNCEMNT)
+        "Total Equity": "total_equity",
+        "Total EQUITY": "total_equity",
+        "Total equity": "total_equity",
+        "SHAREHOLDERS\" EQUITY- PARENT COMPANY": "total_equity",  # CROWNCEMNT
         "Total Non-Current Liabilities": "non_current_liabilities",
         "Non-Current Liabilities:": "non_current_liabilities",
         "Non-Current Liabilities": "non_current_liabilities",
         "Total Current Liabilities": "current_liabilities",
         "Current Liabilities:": "current_liabilities",
         "Current Liabilities": "current_liabilities",
-        # Income Statement
+        # Income Statement - Revenue variations
         "Net Sales Revenue": "revenue",
         "Revenue": "revenue",
         "Collection from revenue": "revenue",
+        "Net Turnover": "revenue",  # BPML, HAKKANIPUL
+        "Revenue/ Net Turnover": "revenue",  # BSC
+        "Turnover": "revenue",
+        # Income Statement - Profit
         "Gross Profit": "gross_profit",
         "Profit from Operations": "operating_income",
+        "Profit from Operation": "operating_income",
         "Operating Profit": "operating_income",
         "Profit after Tax for the Period": "net_income",
         "Net Profit After Tax": "net_income",
+        "Net profit/ (Loss) after tax": "net_income",  # BPML, HAKKANIPUL
+        "Net Profit after Tax (NPAT) for the year": "net_income",  # BSC
+        "Net profit/(Loss) after tax": "net_income",
         "Profit Before Tax": "profit_before_tax",
+        "Net Profit Before Tax": "profit_before_tax",
+        # Income Statement - EPS variations
         "Earnings Per Share (EPS)": "eps",
         "Basic Earnings Per Share": "eps",
+        "Earnings per share (Fully diluted basis)": "eps",  # BPML, HAKKANIPUL
+        "Earnings Per Share (Basic)": "eps",  # BSC
+        "EPS": "eps",
+        "Earnings Per Share": "eps",
         # Cash Flow - multiple variations across different companies
         "Net cash flows from operating activities": "operating_cash_flow",
         "Net cash from operating activities": "operating_cash_flow",
@@ -54,6 +79,19 @@ class LankaBDScraper:
         "Cash generated from operating activities": "operating_cash_flow",
         "Net cash generated from /(used in) operating activities": "operating_cash_flow",
         "Net cash generated from/(used in) operating activities": "operating_cash_flow",
+        "Net Cash Generated from Operating Activities": "operating_cash_flow",
+        "Net Cash Generated from Operating Actvities": "operating_cash_flow",  # typo on some pages
+        "Net cash generated from operating activities": "operating_cash_flow",
+        "Cash Generated from Operations": "operating_cash_flow",
+        "Net cash inflow from operating activities": "operating_cash_flow",
+        "Cash inflow from operating activities": "operating_cash_flow",
+        # "provided" variations - common across many companies
+        "Net cash provided from operating activities": "operating_cash_flow",
+        "Net cash provided by operating activities": "operating_cash_flow",
+        "Net Cash Provided/(Used) by Operating Activities": "operating_cash_flow",
+        "Net Cash Provided/(Used) by Operation activities": "operating_cash_flow",
+        "Net cash provided/(used) by operating activities": "operating_cash_flow",
+        "Net cash provided/(used) in operating activities": "operating_cash_flow",
         "Acquisition of property, plant and equipment": "capital_expenditure",
         "Purchase of property, plant and equipment": "capital_expenditure",
         "Acquisition of PPE": "capital_expenditure",

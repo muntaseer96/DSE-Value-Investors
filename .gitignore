@@ -35,3 +35,17 @@ Thumbs.db
 # Logs
 *.log
 data/
+
+# Scraping temporary files
+*_results.json
+*_successful.json
+*_failed*.json
+*_failed*.txt
+scraped_*.json
+import_batch_*.sql
+sql_batch_*.sql
+update_*.sql
+rescrape_*.py
+batch_scrape_*.py
+test_scrape*.py
+execute_*.py
