@@ -87,8 +87,22 @@
             case 'PASS': return 'positive';
             case 'WEAK': return 'neutral';
             case 'FAIL': return 'negative';
+            case 'NEGATIVE': return 'negative';
+            case 'INCONSISTENT': return 'warning';
+            case 'NO_DATA': return 'muted';
             default: return '';
         }
+    }
+
+    function formatCagrDisplay(metric: any): string {
+        if (metric.cagr_pct === null || metric.cagr_pct === undefined) {
+            // Show status-based text for special cases
+            if (metric.status === 'NEGATIVE') return 'N/A';
+            if (metric.status === 'INCONSISTENT') return '~' + (metric.cagr_pct?.toFixed(1) || '?') + '%';
+            if (metric.status === 'NO_DATA') return '-';
+            return '-';
+        }
+        return (metric.cagr_pct > 0 ? '+' : '') + metric.cagr_pct.toFixed(1) + '%';
     }
 
     function formatCurrency(value: number | undefined | null): string {
@@ -319,11 +333,15 @@
                                 {metric.status}
                             </span>
                         </div>
-                        <div class="metric-cagr {metric.passes ? 'positive' : 'negative'}">
-                            {metric.cagr_pct > 0 ? '+' : ''}{metric.cagr_pct.toFixed(1)}%
+                        <div class="metric-cagr {getStatusClass(metric.status)}">
+                            {formatCagrDisplay(metric)}
                         </div>
                         <div class="metric-note">
-                            {metric.years} year{metric.years !== 1 ? 's' : ''} of data
+                            {#if metric.note}
+                                {metric.note}
+                            {:else}
+                                {metric.years} year{metric.years !== 1 ? 's' : ''} of data
+                            {/if}
                         </div>
                     </div>
                 {/each}
@@ -707,6 +725,14 @@
     .metric-cagr {
         font-family: 'DM Serif Display', Georgia, serif;
         font-size: 1.5rem;
+    }
+
+    .metric-cagr.warning {
+        color: var(--warning, #f59e0b);
+    }
+
+    .metric-cagr.muted {
+        color: var(--text-muted);
     }
 
     .metric-note {
