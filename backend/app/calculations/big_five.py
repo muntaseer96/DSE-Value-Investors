@@ -24,17 +24,21 @@ class GrowthMetric:
     cagr: float  # Growth rate as decimal
     cagr_pct: float  # Growth rate as percentage
     passes: bool  # True if CAGR >= 10%
-    status: str  # "STRONG", "PASS", "WEAK", "FAIL"
+    status: str  # "STRONG", "PASS", "WEAK", "FAIL", "NEGATIVE", "NO_DATA", "INCONSISTENT"
+    note: Optional[str] = None  # Explanation for special cases
 
     def to_dict(self):
-        return {
+        result = {
             "name": self.name,
             "values": [round(v, 2) if v else None for v in self.values],
             "years": self.years,
-            "cagr_pct": round(self.cagr_pct, 2),
+            "cagr_pct": round(self.cagr_pct, 2) if self.cagr_pct is not None else None,
             "passes": self.passes,
             "status": self.status,
         }
+        if self.note:
+            result["note"] = self.note
+        return result
 
 
 @dataclass
@@ -109,6 +113,28 @@ class BigFiveCalculator:
         except (ValueError, ZeroDivisionError):
             return 0.0
 
+    def _analyze_values(self, values: List[float]) -> Dict:
+        """Analyze values to detect patterns (negative, inconsistent, etc.)."""
+        if not values:
+            return {"pattern": "no_data", "positive": 0, "negative": 0, "zero_null": 0}
+
+        positive = sum(1 for v in values if v and v > 0)
+        negative = sum(1 for v in values if v and v < 0)
+        zero_null = sum(1 for v in values if not v or v == 0)
+        total_valid = positive + negative
+
+        if total_valid == 0:
+            return {"pattern": "no_data", "positive": 0, "negative": 0, "zero_null": len(values)}
+
+        neg_ratio = negative / total_valid if total_valid > 0 else 0
+
+        if neg_ratio >= 0.7:  # 70%+ negative
+            return {"pattern": "negative", "positive": positive, "negative": negative, "zero_null": zero_null}
+        elif neg_ratio >= 0.3:  # 30-70% negative = inconsistent
+            return {"pattern": "inconsistent", "positive": positive, "negative": negative, "zero_null": zero_null}
+        else:
+            return {"pattern": "normal", "positive": positive, "negative": negative, "zero_null": zero_null}
+
     def _evaluate_growth(self, name: str, values: List[float]) -> GrowthMetric:
         """Evaluate a single growth metric.
 
@@ -119,9 +145,54 @@ class BigFiveCalculator:
         Returns:
             GrowthMetric result
         """
+        years = len(values) - 1 if len(values) > 1 else 0
+
+        # Analyze values for special patterns
+        analysis = self._analyze_values(values)
+
+        # Handle special cases first
+        if analysis["pattern"] == "no_data":
+            return GrowthMetric(
+                name=name,
+                values=values,
+                years=years,
+                cagr=0.0,
+                cagr_pct=None,
+                passes=False,
+                status="NO_DATA",
+                note="Insufficient data to calculate growth rate",
+            )
+
+        if analysis["pattern"] == "negative":
+            return GrowthMetric(
+                name=name,
+                values=values,
+                years=years,
+                cagr=0.0,
+                cagr_pct=None,
+                passes=False,
+                status="NEGATIVE",
+                note=f"Mostly negative values ({analysis['negative']} of {analysis['positive'] + analysis['negative']} years) - cash burning",
+            )
+
+        if analysis["pattern"] == "inconsistent":
+            # Still calculate CAGR for positive values, but flag as inconsistent
+            cagr = self.calculate_cagr(values)
+            cagr_pct = cagr * 100
+            return GrowthMetric(
+                name=name,
+                values=values,
+                years=years,
+                cagr=cagr,
+                cagr_pct=cagr_pct,
+                passes=False,  # Inconsistent = fail regardless of CAGR
+                status="INCONSISTENT",
+                note=f"Fluctuating between positive ({analysis['positive']}) and negative ({analysis['negative']}) years",
+            )
+
+        # Normal case - calculate CAGR
         cagr = self.calculate_cagr(values)
         cagr_pct = cagr * 100
-        years = len(values) - 1 if len(values) > 1 else 0
 
         # Determine status
         if cagr >= self.STRONG_THRESHOLD:
