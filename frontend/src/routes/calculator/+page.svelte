@@ -282,12 +282,6 @@
             </div>
 
         </div>
-
-        <!-- Calculation Breakdown Component -->
-        <CalculationBreakdown
-            stickerData={stickerResult}
-            fourMsData={fullAnalysis?.four_ms}
-        />
     {/if}
 
     {#if bigFiveResult}
@@ -507,9 +501,28 @@
             </div>
         </div>
     {/if}
+
+    <!-- Calculation Breakdown (subtle, at bottom) -->
+    {#if stickerResult}
+        <div class="calculation-details-section">
+            <CalculationBreakdown
+                stickerData={stickerResult}
+                fourMsData={fullAnalysis?.four_ms}
+            />
+        </div>
+    {/if}
 </div>
 
 <style>
+    /* Calculation Details Section - Subtle at bottom */
+    .calculation-details-section {
+        margin-top: 2rem;
+        opacity: 0.85;
+    }
+
+    .calculation-details-section:hover {
+        opacity: 1;
+    }
     .calculator-page {
         max-width: 900px;
         margin: 0 auto;
