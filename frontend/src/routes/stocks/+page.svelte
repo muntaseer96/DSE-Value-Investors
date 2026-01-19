@@ -200,6 +200,33 @@
         return '';
     }
 
+    function getSectorAbbrev(sector: string | undefined | null): string {
+        if (!sector) return '';
+        const abbrevMap: Record<string, string> = {
+            'Pharmaceuticals': 'Pharma',
+            'Banking': 'Bank',
+            'NBFI': 'NBFI',
+            'Cement': 'Cement',
+            'FMCG': 'FMCG',
+            'Textiles & RMG': 'Textile',
+            'Power & Energy': 'Power',
+            'Telecom': 'Telco',
+            'IT & Technology': 'IT',
+            'Ceramics': 'Ceramic',
+            'Steel': 'Steel',
+            'Food & Allied': 'Food',
+            'Insurance': 'Insur',
+            'Engineering': 'Engg',
+            'Miscellaneous': 'Misc',
+        };
+        return abbrevMap[sector] || sector.slice(0, 5);
+    }
+
+    function getValuationTooltip(stock: StockPrice): string {
+        if (stock.valuation_status === 'CALCULABLE') return '';
+        return stock.valuation_note || (stock.valuation_status === 'NOT_CALCULABLE' ? 'Not calculable' : 'No financial data available');
+    }
+
     // Refresh valuations
     async function refreshValuations() {
         refreshingValuations = true;
@@ -427,7 +454,7 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>
+                                <th title="Stock trading code on DSE">
                                     <button class="sort-header" on:click={() => handleSort('symbol')}>
                                         Symbol
                                         <span class="sort-icon" class:active={sortKey === 'symbol'}>
@@ -435,7 +462,7 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right">
+                                <th class="text-right" title="Last Traded Price - the most recent price at which the stock was bought or sold">
                                     <button class="sort-header" on:click={() => handleSort('ltp')}>
                                         LTP
                                         <span class="sort-icon" class:active={sortKey === 'ltp'}>
@@ -443,7 +470,7 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right">
+                                <th class="text-right" title="Price change from yesterday's close. Green = price went up, Red = price went down">
                                     <button class="sort-header" on:click={() => handleSort('change_pct')}>
                                         Change
                                         <span class="sort-icon" class:active={sortKey === 'change_pct'}>
@@ -451,7 +478,7 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right">
+                                <th class="text-right" title="Highest price the stock traded at today">
                                     <button class="sort-header" on:click={() => handleSort('high')}>
                                         High
                                         <span class="sort-icon" class:active={sortKey === 'high'}>
@@ -459,7 +486,7 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right">
+                                <th class="text-right" title="Lowest price the stock traded at today">
                                     <button class="sort-header" on:click={() => handleSort('low')}>
                                         Low
                                         <span class="sort-icon" class:active={sortKey === 'low'}>
@@ -467,7 +494,7 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right">
+                                <th class="text-right" title="Number of shares traded today. Higher volume = more trading activity">
                                     <button class="sort-header" on:click={() => handleSort('volume')}>
                                         Volume
                                         <span class="sort-icon" class:active={sortKey === 'volume'}>
@@ -475,7 +502,7 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right valuation-col">
+                                <th class="text-right valuation-col" title="Intrinsic value based on projected earnings growth (Phil Town's Rule #1)">
                                     <button class="sort-header" on:click={() => handleSort('sticker_price')}>
                                         Sticker
                                         <span class="sort-icon" class:active={sortKey === 'sticker_price'}>
@@ -483,7 +510,7 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right valuation-col">
+                                <th class="text-right valuation-col" title="Margin of Safety - 50% of Sticker Price, ideal buy price for safety buffer">
                                     <button class="sort-header" on:click={() => handleSort('margin_of_safety')}>
                                         MOS
                                         <span class="sort-icon" class:active={sortKey === 'margin_of_safety'}>
@@ -491,7 +518,7 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right valuation-col">
+                                <th class="text-right valuation-col" title="Price vs Sticker: Negative = undervalued (good), Positive = overvalued (expensive)">
                                     <button class="sort-header" on:click={() => handleSort('discount_pct')}>
                                         Discount
                                         <span class="sort-icon" class:active={sortKey === 'discount_pct'}>
@@ -499,7 +526,7 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right valuation-col">
+                                <th class="text-right valuation-col" title="4Ms Score (0-100): Meaning, Moat, Management, Margin of Safety. A/B = Strong, C = Average, D/F = Weak">
                                     <button class="sort-header" on:click={() => handleSort('four_m_score')}>
                                         Phil Score
                                         <span class="sort-icon" class:active={sortKey === 'four_m_score'}>
@@ -516,6 +543,9 @@
                                     <td>
                                         <a href="/stocks/{stock.symbol}" class="stock-cell">
                                             <span class="stock-symbol">{stock.symbol}</span>
+                                            {#if stock.sector && stock.sector !== 'Unknown'}
+                                                <span class="sector-badge" title={stock.sector}>{getSectorAbbrev(stock.sector)}</span>
+                                            {/if}
                                         </a>
                                     </td>
                                     <td class="text-right tabular-nums font-semibold">
@@ -542,22 +572,21 @@
                                     <td class="text-right tabular-nums text-muted">{formatPrice(stock.low)}</td>
                                     <td class="text-right tabular-nums">{formatVolume(stock.volume)}</td>
                                     <!-- Valuation columns -->
-                                    {@const valuationTooltip = stock.valuation_note || (stock.valuation_status === 'NOT_CALCULABLE' ? 'Not calculable' : 'No financial data available')}
-                                    <td class="text-right tabular-nums valuation-col" title={stock.valuation_status !== 'CALCULABLE' ? valuationTooltip : ''}>
+                                    <td class="text-right tabular-nums valuation-col" title={getValuationTooltip(stock)}>
                                         {#if stock.valuation_status === 'CALCULABLE'}
                                             {formatPrice(stock.sticker_price)}
                                         {:else}
                                             <span class="text-muted na-value">N/A</span>
                                         {/if}
                                     </td>
-                                    <td class="text-right tabular-nums valuation-col" title={stock.valuation_status !== 'CALCULABLE' ? valuationTooltip : ''}>
+                                    <td class="text-right tabular-nums valuation-col" title={getValuationTooltip(stock)}>
                                         {#if stock.valuation_status === 'CALCULABLE'}
                                             {formatPrice(stock.margin_of_safety)}
                                         {:else}
                                             <span class="text-muted na-value">N/A</span>
                                         {/if}
                                     </td>
-                                    <td class="text-right valuation-col {getDiscountClass(stock.discount_pct)}" title={stock.valuation_status !== 'CALCULABLE' ? valuationTooltip : ''}>
+                                    <td class="text-right valuation-col {getDiscountClass(stock.discount_pct)}" title={getValuationTooltip(stock)}>
                                         {#if stock.valuation_status === 'CALCULABLE' && stock.discount_pct !== null && stock.discount_pct !== undefined}
                                             <div class="discount-cell">
                                                 <span class="discount-icon">{getDiscountIcon(stock.discount_pct)}</span>
@@ -567,7 +596,7 @@
                                             <span class="text-muted na-value">N/A</span>
                                         {/if}
                                     </td>
-                                    <td class="text-right valuation-col {getGradeClass(stock.four_m_grade)}" title={stock.valuation_status !== 'CALCULABLE' ? valuationTooltip : ''}>
+                                    <td class="text-right valuation-col {getGradeClass(stock.four_m_grade)}" title={getValuationTooltip(stock)}>
                                         {#if stock.valuation_status === 'CALCULABLE' && stock.four_m_score !== null && stock.four_m_score !== undefined}
                                             <span class="phil-score tabular-nums">{formatScore(stock.four_m_score, stock.four_m_grade)}</span>
                                         {:else}
@@ -902,6 +931,20 @@
 
     .stock-cell:hover .stock-symbol {
         color: var(--accent-hover);
+    }
+
+    .sector-badge {
+        display: inline-block;
+        margin-left: 0.5rem;
+        padding: 0.125rem 0.375rem;
+        font-size: 0.625rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+        color: var(--text-muted);
+        background: var(--bg-secondary);
+        border-radius: var(--radius-sm);
+        vertical-align: middle;
     }
 
     .change-cell {

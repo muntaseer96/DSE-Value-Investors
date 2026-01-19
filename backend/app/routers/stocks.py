@@ -30,6 +30,7 @@ router = APIRouter(prefix="/stocks", tags=["Stocks"])
 
 class StockPrice(BaseModel):
     symbol: str
+    sector: Optional[str] = None  # From sector mapping
     ltp: Optional[float] = None
     high: Optional[float] = None
     low: Optional[float] = None
@@ -93,6 +94,8 @@ class ManualFinancialEntry(BaseModel):
 @router.get("/prices", response_model=List[StockPrice])
 def get_all_prices(limit: int = Query(default=500, le=500), db: Session = Depends(get_db)):
     """Get current prices for all DSE stocks with cached valuation data."""
+    from app.calculations.sectors import get_sector
+
     data_service = DSEDataService()
     df = data_service.get_current_prices()
 
@@ -112,6 +115,9 @@ def get_all_prices(limit: int = Query(default=500, le=500), db: Session = Depend
         symbol = str(row.get('trading_code', row.get('symbol', '')))
         ltp = _safe_float(row.get('ltp', row.get('close')))
 
+        # Get sector from mapping
+        sector = get_sector(symbol).value if symbol else None
+
         # Get cached valuation if exists
         stock_val = valuations.get(symbol)
 
@@ -124,6 +130,7 @@ def get_all_prices(limit: int = Query(default=500, le=500), db: Session = Depend
 
         price = StockPrice(
             symbol=symbol,
+            sector=sector,
             ltp=ltp,
             high=_safe_float(row.get('high')),
             low=_safe_float(row.get('low')),

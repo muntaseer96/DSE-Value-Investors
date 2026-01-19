@@ -124,6 +124,7 @@ export interface HoldingUpdate {
 
 export interface StockPrice {
     symbol: string;
+    sector?: string;  // From sector mapping
     ltp?: number;
     high?: number;
     low?: number;
