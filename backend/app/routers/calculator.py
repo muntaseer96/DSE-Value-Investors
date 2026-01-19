@@ -35,6 +35,8 @@ class StickerPriceResponse(BaseModel):
     discount_to_sticker: Optional[float] = None
     discount_to_mos: Optional[float] = None
     recommendation: Optional[str] = None
+    status: str = "CALCULABLE"  # CALCULABLE, NOT_CALCULABLE
+    note: Optional[str] = None  # Explanation when not calculable
 
 
 class BigFiveResponse(BaseModel):
@@ -98,19 +100,8 @@ def calculate_sticker_price(request: StickerPriceRequest, db: Session = Depends(
                 detail=f"Insufficient financial data for {request.symbol}. Need at least 2 years of data."
             )
 
-        # Extract EPS history
-        eps_history = [f.eps for f in financials if f.eps]
-
-        if not eps_history or len(eps_history) < 2:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Insufficient EPS data for {request.symbol}"
-            )
-
-        current_eps = eps_history[-1]
-
-        # Calculate EPS growth rate
-        eps_growth_rate = calculator.calculate_cagr(eps_history)
+        # Extract EPS history (include all values, even None/negative for quality check)
+        eps_history = [f.eps for f in financials if f.eps is not None]
 
         # Get historical PE (average from data or use default)
         pe_values = [f.pe_ratio for f in financials if f.pe_ratio]
@@ -123,6 +114,13 @@ def calculate_sticker_price(request: StickerPriceRequest, db: Session = Depends(
             price_data = data_service.get_stock_price(request.symbol.upper())
             if price_data:
                 current_price = float(price_data.get('ltp', price_data.get('close', 0)))
+
+        # Use calculate_from_financials which includes quality check
+        result = calculator.calculate_from_financials(
+            eps_history=eps_history,
+            historical_pe=historical_pe,
+            current_price=current_price,
+        )
 
     else:
         # Use manual values
@@ -137,13 +135,13 @@ def calculate_sticker_price(request: StickerPriceRequest, db: Session = Depends(
         historical_pe = request.historical_pe
         current_price = request.current_price
 
-    # Calculate sticker price
-    result = calculator.calculate(
-        current_eps=current_eps,
-        eps_growth_rate=eps_growth_rate,
-        historical_pe=historical_pe,
-        current_price=current_price,
-    )
+        # For manual input, use direct calculate (user knows what they're doing)
+        result = calculator.calculate(
+            current_eps=current_eps,
+            eps_growth_rate=eps_growth_rate,
+            historical_pe=historical_pe,
+            current_price=current_price,
+        )
 
     return StickerPriceResponse(
         symbol=request.symbol.upper() if request.symbol else None,

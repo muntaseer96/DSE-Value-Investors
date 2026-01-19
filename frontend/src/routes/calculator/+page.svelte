@@ -238,8 +238,36 @@
                 {/if}
             </div>
 
-            <!-- Price Comparison Cards -->
-            <div class="price-comparison">
+            {#if stickerResult.status === 'NOT_CALCULABLE'}
+                <!-- Not Calculable Warning -->
+                <div class="not-calculable-box">
+                    <div class="not-calculable-icon">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="12"/>
+                            <line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                    </div>
+                    <div class="not-calculable-title">Cannot Calculate Sticker Price</div>
+                    <div class="not-calculable-note">{stickerResult.note}</div>
+                    <div class="not-calculable-details">
+                        <div class="detail-item">
+                            <span class="detail-label">Current EPS:</span>
+                            <span class="detail-value">{stickerResult.current_eps?.toFixed(2) ?? 'N/A'}</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="detail-label">EPS Growth Rate:</span>
+                            <span class="detail-value">{stickerResult.eps_growth_rate?.toFixed(2) ?? 'N/A'}%</span>
+                        </div>
+                    </div>
+                    <div class="not-calculable-advice">
+                        Phil Town's sticker price formula requires positive, growing earnings.
+                        This stock may still be investable but requires different analysis methods.
+                    </div>
+                </div>
+            {:else}
+                <!-- Price Comparison Cards -->
+                <div class="price-comparison">
                 <div class="price-box mos-box">
                     <div class="price-icon">
                         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -284,6 +312,7 @@
                     </div>
                 {/if}
             </div>
+            {/if}
 
         </div>
     {/if}
@@ -518,6 +547,73 @@
 </div>
 
 <style>
+    /* Not Calculable Box */
+    .not-calculable-box {
+        padding: 2rem;
+        text-align: center;
+        background: var(--bg-secondary);
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border-warning);
+    }
+
+    .not-calculable-icon {
+        color: var(--text-warning);
+        margin-bottom: 1rem;
+    }
+
+    .not-calculable-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+    }
+
+    .not-calculable-note {
+        color: var(--text-warning);
+        font-weight: 500;
+        margin-bottom: 1rem;
+        padding: 0.75rem;
+        background: rgba(var(--warning-rgb), 0.1);
+        border-radius: var(--radius-sm);
+    }
+
+    .not-calculable-details {
+        display: flex;
+        justify-content: center;
+        gap: 2rem;
+        margin-bottom: 1rem;
+        padding: 0.75rem;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-sm);
+    }
+
+    .detail-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .detail-label {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    .detail-value {
+        font-size: 1.125rem;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+
+    .not-calculable-advice {
+        font-size: 0.875rem;
+        color: var(--text-secondary);
+        font-style: italic;
+        max-width: 500px;
+        margin: 0 auto;
+    }
+
     /* Calculation Details Section - Subtle at bottom */
     .calculation-details-section {
         margin-top: 2rem;

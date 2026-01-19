@@ -169,6 +169,8 @@ export interface StickerPriceResponse {
     discount_to_sticker?: number;
     discount_to_mos?: number;
     recommendation?: string;
+    status: string;  // CALCULABLE or NOT_CALCULABLE
+    note?: string;   // Explanation when not calculable
 }
 
 export interface BigFiveResponse {

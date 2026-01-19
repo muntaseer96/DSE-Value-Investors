@@ -44,6 +44,10 @@ class StickerPriceResult:
     discount_to_mos: Optional[float] = None  # Percentage
     recommendation: Optional[str] = None
 
+    # Status for stocks that can't be valued
+    status: str = "CALCULABLE"  # CALCULABLE, NOT_CALCULABLE
+    note: Optional[str] = None  # Explanation when not calculable
+
     def to_dict(self):
         return {
             "current_eps": round(self.current_eps, 2),
@@ -59,6 +63,8 @@ class StickerPriceResult:
             "discount_to_sticker": round(self.discount_to_sticker, 2) if self.discount_to_sticker else None,
             "discount_to_mos": round(self.discount_to_mos, 2) if self.discount_to_mos else None,
             "recommendation": self.recommendation,
+            "status": self.status,
+            "note": self.note,
         }
 
 
@@ -213,6 +219,60 @@ class StickerPriceCalculator:
         else:
             return "SELL"
 
+    def _create_not_calculable_result(
+        self,
+        note: str,
+        current_eps: float = 0,
+        eps_growth_rate: float = 0,
+        historical_pe: float = 0,
+        current_price: Optional[float] = None,
+    ) -> StickerPriceResult:
+        """Create a NOT_CALCULABLE result with explanation."""
+        return StickerPriceResult(
+            current_eps=current_eps,
+            eps_growth_rate=eps_growth_rate,
+            used_growth_rate=0,
+            historical_pe=historical_pe,
+            future_eps=0,
+            future_pe=0,
+            future_price=0,
+            sticker_price=0,
+            margin_of_safety=0,
+            current_price=current_price,
+            recommendation="AVOID",
+            status="NOT_CALCULABLE",
+            note=note,
+        )
+
+    def check_eps_quality(self, eps_history: List[float]) -> tuple[bool, Optional[str]]:
+        """Check if EPS history is suitable for sticker price calculation.
+
+        Returns:
+            (is_calculable, reason_if_not)
+        """
+        if not eps_history or len(eps_history) < 2:
+            return False, "Insufficient EPS data (need at least 2 years)"
+
+        # Count negative EPS years
+        negative_count = sum(1 for eps in eps_history if eps is not None and eps <= 0)
+        total_count = len([eps for eps in eps_history if eps is not None])
+
+        if total_count == 0:
+            return False, "No valid EPS data available"
+
+        negative_ratio = negative_count / total_count
+
+        # If more than 50% of years have negative/zero EPS, not calculable
+        if negative_ratio > 0.5:
+            return False, f"Chronic loss-maker: {negative_count}/{total_count} years with negative/zero EPS"
+
+        # If the most recent EPS is negative
+        recent_eps = eps_history[-1] if eps_history else 0
+        if recent_eps is not None and recent_eps <= 0:
+            return False, f"Current EPS is negative ({recent_eps:.2f}). Cannot project future value."
+
+        return True, None
+
     def calculate_from_financials(
         self,
         eps_history: List[float],  # Last 5-6 years EPS, oldest first
@@ -229,6 +289,19 @@ class StickerPriceCalculator:
         Returns:
             StickerPriceResult
         """
+        # Check if EPS data is suitable for calculation
+        is_calculable, reason = self.check_eps_quality(eps_history)
+        if not is_calculable:
+            current_eps = eps_history[-1] if eps_history else 0
+            eps_growth_rate = self.calculate_cagr(eps_history)
+            return self._create_not_calculable_result(
+                note=reason,
+                current_eps=current_eps,
+                eps_growth_rate=eps_growth_rate,
+                historical_pe=historical_pe,
+                current_price=current_price,
+            )
+
         # Calculate EPS growth rate
         eps_growth_rate = self.calculate_cagr(eps_history)
 
