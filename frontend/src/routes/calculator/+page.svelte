@@ -231,9 +231,9 @@
                         <span class="symbol-tag">{stickerResult.symbol}</span>
                     {/if}
                 </h2>
-                {#if stickerResult.recommendation}
-                    <span class="badge {getRecommendationClass(stickerResult.recommendation)}">
-                        {stickerResult.recommendation.replace('_', ' ')}
+                {#if fullAnalysis?.recommendation || stickerResult.recommendation}
+                    <span class="badge {getRecommendationClass(fullAnalysis?.recommendation || stickerResult.recommendation)}">
+                        {(fullAnalysis?.recommendation || stickerResult.recommendation)?.replace('_', ' ')}
                     </span>
                 {/if}
             </div>
