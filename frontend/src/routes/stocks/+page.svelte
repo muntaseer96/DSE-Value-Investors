@@ -542,21 +542,22 @@
                                     <td class="text-right tabular-nums text-muted">{formatPrice(stock.low)}</td>
                                     <td class="text-right tabular-nums">{formatVolume(stock.volume)}</td>
                                     <!-- Valuation columns -->
-                                    <td class="text-right tabular-nums valuation-col" title={stock.valuation_note || ''}>
+                                    {@const valuationTooltip = stock.valuation_note || (stock.valuation_status === 'NOT_CALCULABLE' ? 'Not calculable' : 'No financial data available')}
+                                    <td class="text-right tabular-nums valuation-col" title={stock.valuation_status !== 'CALCULABLE' ? valuationTooltip : ''}>
                                         {#if stock.valuation_status === 'CALCULABLE'}
                                             {formatPrice(stock.sticker_price)}
                                         {:else}
                                             <span class="text-muted na-value">N/A</span>
                                         {/if}
                                     </td>
-                                    <td class="text-right tabular-nums valuation-col" title={stock.valuation_note || ''}>
+                                    <td class="text-right tabular-nums valuation-col" title={stock.valuation_status !== 'CALCULABLE' ? valuationTooltip : ''}>
                                         {#if stock.valuation_status === 'CALCULABLE'}
                                             {formatPrice(stock.margin_of_safety)}
                                         {:else}
                                             <span class="text-muted na-value">N/A</span>
                                         {/if}
                                     </td>
-                                    <td class="text-right valuation-col {getDiscountClass(stock.discount_pct)}" title={stock.valuation_note || ''}>
+                                    <td class="text-right valuation-col {getDiscountClass(stock.discount_pct)}" title={stock.valuation_status !== 'CALCULABLE' ? valuationTooltip : ''}>
                                         {#if stock.valuation_status === 'CALCULABLE' && stock.discount_pct !== null && stock.discount_pct !== undefined}
                                             <div class="discount-cell">
                                                 <span class="discount-icon">{getDiscountIcon(stock.discount_pct)}</span>
@@ -566,7 +567,7 @@
                                             <span class="text-muted na-value">N/A</span>
                                         {/if}
                                     </td>
-                                    <td class="text-right valuation-col {getGradeClass(stock.four_m_grade)}" title={stock.valuation_note || ''}>
+                                    <td class="text-right valuation-col {getGradeClass(stock.four_m_grade)}" title={stock.valuation_status !== 'CALCULABLE' ? valuationTooltip : ''}>
                                         {#if stock.valuation_status === 'CALCULABLE' && stock.four_m_score !== null && stock.four_m_score !== undefined}
                                             <span class="phil-score tabular-nums">{formatScore(stock.four_m_score, stock.four_m_grade)}</span>
                                         {:else}
