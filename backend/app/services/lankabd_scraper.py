@@ -53,6 +53,12 @@ class LankaBDScraper:
         "Net Turnover": "revenue",  # BPML, HAKKANIPUL
         "Revenue/ Net Turnover": "revenue",  # BSC
         "Turnover": "revenue",
+        # Bank/Financial Institution revenue (they use Interest Income instead of Turnover)
+        "Interest income": "revenue",
+        "Interest Income": "revenue",
+        "Total operating income": "revenue",
+        "Total Operating Income": "revenue",
+        # Note: Don't add "Operating Income" alone as it conflicts with "Non-operating income"
         # Income Statement - Profit
         "Gross Profit": "gross_profit",
         "Profit from Operations": "operating_income",
@@ -63,6 +69,9 @@ class LankaBDScraper:
         "Net profit/ (Loss) after tax": "net_income",  # BPML, HAKKANIPUL
         "Net Profit after Tax (NPAT) for the year": "net_income",  # BSC
         "Net profit/(Loss) after tax": "net_income",
+        "Net profit after tax for the year": "net_income",  # Banks
+        "Profit after tax": "net_income",  # Common variation
+        "Profit After Tax": "net_income",
         "Profit Before Tax": "profit_before_tax",
         "Net Profit Before Tax": "profit_before_tax",
         # Income Statement - EPS variations
@@ -302,7 +311,8 @@ class LankaBDScraper:
                     // Get years from header row (skip first "Particulars" column)
                     const headers = Array.from(rows[0].cells).map(c => c.innerText.trim());
                     const years = headers.slice(1).map(h => {{
-                        const match = h.match(/20\\d{{2}}/);
+                        // Use [0-9] instead of \\d for better compatibility
+                        const match = h.match(/20[0-9]{{2}}/);
                         return match ? parseInt(match[0]) : null;
                     }}).filter(y => y !== null);
 
@@ -382,8 +392,17 @@ class LankaBDScraper:
 
         # Try case-insensitive partial match
         field_lower = field_name_clean.lower()
+
+        # Exclusion patterns - avoid matching certain fields as revenue
+        # These are typically cash flow items, not actual revenue
+        revenue_exclusions = ['fdr', 'ipo', 'from fdr', 'from ipo', 'dividend']
+
         for key, value in self.FIELD_MAPPING.items():
             if key.lower() in field_lower or field_lower in key.lower():
+                # If this would match to revenue, check exclusions
+                if value == 'revenue':
+                    if any(excl in field_lower for excl in revenue_exclusions):
+                        continue  # Skip this match, try next
                 return value
 
         return None
