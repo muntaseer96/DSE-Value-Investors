@@ -38,6 +38,15 @@ class StockPrice(BaseModel):
     volume: Optional[int] = None
     change: Optional[float] = None
     change_pct: Optional[float] = None
+    # Valuation data (from cached stocks table)
+    sticker_price: Optional[float] = None
+    margin_of_safety: Optional[float] = None
+    discount_pct: Optional[float] = None  # Live calculated: negative = undervalued
+    four_m_score: Optional[float] = None
+    four_m_grade: Optional[str] = None
+    recommendation: Optional[str] = None
+    valuation_status: Optional[str] = None
+    valuation_note: Optional[str] = None
 
 
 class StockDetail(BaseModel):
@@ -82,19 +91,40 @@ class ManualFinancialEntry(BaseModel):
 
 
 @router.get("/prices", response_model=List[StockPrice])
-def get_all_prices(limit: int = Query(default=500, le=500)):
-    """Get current prices for all DSE stocks."""
+def get_all_prices(limit: int = Query(default=500, le=500), db: Session = Depends(get_db)):
+    """Get current prices for all DSE stocks with cached valuation data."""
     data_service = DSEDataService()
     df = data_service.get_current_prices()
 
     if df.empty:
         raise HTTPException(status_code=503, detail="Could not fetch price data")
 
+    # Get all cached valuations from stocks table (keyed by symbol)
+    valuations = {}
+    stocks_with_vals = db.query(Stock).filter(
+        Stock.valuation_status.in_(["CALCULABLE", "NOT_CALCULABLE"])
+    ).all()
+    for stock in stocks_with_vals:
+        valuations[stock.symbol] = stock
+
     prices = []
     for _, row in df.head(limit).iterrows():
+        symbol = str(row.get('trading_code', row.get('symbol', '')))
+        ltp = _safe_float(row.get('ltp', row.get('close')))
+
+        # Get cached valuation if exists
+        stock_val = valuations.get(symbol)
+
+        # Calculate live discount percentage
+        discount_pct = None
+        if stock_val and stock_val.sticker_price and ltp and stock_val.sticker_price > 0:
+            # Negative = undervalued (price below sticker)
+            # Positive = overvalued (price above sticker)
+            discount_pct = ((ltp - stock_val.sticker_price) / stock_val.sticker_price) * 100
+
         price = StockPrice(
-            symbol=str(row.get('trading_code', row.get('symbol', ''))),
-            ltp=_safe_float(row.get('ltp', row.get('close'))),
+            symbol=symbol,
+            ltp=ltp,
             high=_safe_float(row.get('high')),
             low=_safe_float(row.get('low')),
             open=_safe_float(row.get('open')),
@@ -102,6 +132,15 @@ def get_all_prices(limit: int = Query(default=500, le=500)):
             volume=_safe_int(row.get('volume', row.get('trade'))),
             change=_safe_float(row.get('change', row.get('closep'))),
             change_pct=_safe_float(row.get('change_%', row.get('%change'))),
+            # Valuation data
+            sticker_price=stock_val.sticker_price if stock_val else None,
+            margin_of_safety=stock_val.margin_of_safety if stock_val else None,
+            discount_pct=round(discount_pct, 2) if discount_pct is not None else None,
+            four_m_score=stock_val.four_m_score if stock_val else None,
+            four_m_grade=stock_val.four_m_grade if stock_val else None,
+            recommendation=stock_val.recommendation if stock_val else None,
+            valuation_status=stock_val.valuation_status if stock_val else None,
+            valuation_note=stock_val.valuation_note if stock_val else None,
         )
         prices.append(price)
 

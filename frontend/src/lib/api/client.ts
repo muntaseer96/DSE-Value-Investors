@@ -78,6 +78,12 @@ export const calculator = {
     getBigFive: (symbol: string) => request<BigFiveResponse>(`/calculate/big-five/${symbol}`),
     getFourMs: (symbol: string) => request<FourMsResponse>(`/calculate/four-ms/${symbol}`),
     getFullAnalysis: (symbol: string) => request<FullAnalysisResponse>(`/calculate/analysis/${symbol}`),
+    // Batch valuation endpoints
+    getBatchValuations: () => request<BatchValuationsResponse>('/calculate/batch-valuations'),
+    refreshValuations: () => request<RefreshValuationsResponse>('/calculate/refresh-valuations', {
+        method: 'POST',
+    }),
+    getRefreshStatus: () => request<RefreshStatusResponse>('/calculate/refresh-valuations-status'),
 };
 
 // Types
@@ -126,6 +132,15 @@ export interface StockPrice {
     volume?: number;
     change?: number;
     change_pct?: number;
+    // Valuation data (from cached stocks table)
+    sticker_price?: number;
+    margin_of_safety?: number;
+    discount_pct?: number;  // Negative = undervalued, Positive = overvalued
+    four_m_score?: number;
+    four_m_grade?: string;
+    recommendation?: string;
+    valuation_status?: 'CALCULABLE' | 'NOT_CALCULABLE' | 'UNKNOWN';
+    valuation_note?: string;
 }
 
 export interface FundamentalsResponse {
@@ -260,4 +275,50 @@ export interface FullAnalysisResponse {
     four_ms: FourMsResponse;
     data_years: number;
     recommendation: string;
+}
+
+// Batch Valuation Types
+export interface BatchValuationItem {
+    symbol: string;
+    sticker_price?: number;
+    margin_of_safety?: number;
+    four_m_score?: number;
+    four_m_grade?: string;
+    recommendation?: string;
+    discount_to_sticker?: number;
+    valuation_status: 'CALCULABLE' | 'NOT_CALCULABLE' | 'UNKNOWN';
+    valuation_note?: string;
+    last_valuation_update?: string;
+}
+
+export interface BatchValuationsResponse {
+    count: number;
+    calculable_count: number;
+    not_calculable_count: number;
+    last_refresh?: string;
+    valuations: BatchValuationItem[];
+}
+
+export interface RefreshValuationsResponse {
+    status: 'started' | 'already_running';
+    message: string;
+    total_stocks?: number;
+    check_progress_at?: string;
+    progress?: {
+        current: number;
+        total: number;
+        current_symbol: string;
+    };
+}
+
+export interface RefreshStatusResponse {
+    running: boolean;
+    current: number;
+    total: number;
+    current_symbol: string;
+    success_count: number;
+    failed_count: number;
+    started_at?: string;
+    completed_at?: string;
+    progress_percent?: number;
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { stocks, type StockPrice } from '$lib/api/client';
+    import { stocks, calculator, type StockPrice, type RefreshStatusResponse } from '$lib/api/client';
     import { stocksData, stocksLoaded, stocksLoading, stocksError } from '$lib/stores/stocks';
 
     // Use store values
@@ -10,14 +10,20 @@
     let searchQuery = '';
     let viewMode: 'table' | 'grid' = 'table';
 
-    // Sorting
-    type SortKey = 'symbol' | 'ltp' | 'change' | 'change_pct' | 'volume' | 'high' | 'low';
+    // Sorting - include new valuation columns
+    type SortKey = 'symbol' | 'ltp' | 'change' | 'change_pct' | 'volume' | 'high' | 'low' | 'sticker_price' | 'margin_of_safety' | 'discount_pct' | 'four_m_score';
     let sortKey: SortKey = 'symbol';
     let sortDirection: 'asc' | 'desc' = 'asc';
 
-    // Filtering
-    type FilterType = 'all' | 'gainers' | 'losers' | 'unchanged';
+    // Filtering - include valuation filters
+    type FilterType = 'all' | 'gainers' | 'losers' | 'unchanged' | 'undervalued' | 'overvalued';
     let activeFilter: FilterType = 'all';
+
+    // Valuation refresh state
+    let refreshingValuations = false;
+    let refreshProgress: RefreshStatusResponse | null = null;
+    let refreshError = '';
+    let lastValuationRefresh: string | null = null;
 
     // Subscribe to stores
     stocksData.subscribe(v => priceData = v);
@@ -30,6 +36,9 @@
         if (activeFilter === 'gainers') return (stock.change ?? 0) > 0;
         if (activeFilter === 'losers') return (stock.change ?? 0) < 0;
         if (activeFilter === 'unchanged') return (stock.change ?? 0) === 0;
+        // Valuation filters - only include stocks with calculable valuations
+        if (activeFilter === 'undervalued') return stock.valuation_status === 'CALCULABLE' && (stock.discount_pct ?? 0) < 0;
+        if (activeFilter === 'overvalued') return stock.valuation_status === 'CALCULABLE' && (stock.discount_pct ?? 0) > 0;
         return true;
     });
 
@@ -61,6 +70,10 @@
     $: gainersCount = priceData.filter(s => (s.change ?? 0) > 0).length;
     $: losersCount = priceData.filter(s => (s.change ?? 0) < 0).length;
     $: unchangedCount = priceData.filter(s => (s.change ?? 0) === 0).length;
+    // Valuation stats
+    $: undervaluedCount = priceData.filter(s => s.valuation_status === 'CALCULABLE' && (s.discount_pct ?? 0) < 0).length;
+    $: overvaluedCount = priceData.filter(s => s.valuation_status === 'CALCULABLE' && (s.discount_pct ?? 0) > 0).length;
+    $: valuedCount = priceData.filter(s => s.valuation_status === 'CALCULABLE').length;
 
     onMount(async () => {
         // Only fetch if not already loaded
@@ -70,7 +83,35 @@
         if (!isLoaded) {
             await loadPrices();
         }
+
+        // Check if valuations need auto-refresh (older than 7 days)
+        await checkValuationFreshness();
     });
+
+    async function checkValuationFreshness() {
+        const result = await calculator.getBatchValuations();
+        if (result.error || !result.data) return;
+
+        const lastRefresh = result.data.last_refresh;
+        if (!lastRefresh) {
+            // No valuations cached yet - auto-refresh
+            console.log('No valuations cached, triggering auto-refresh...');
+            await refreshValuations();
+            return;
+        }
+
+        // Check if older than 7 days
+        const lastDate = new Date(lastRefresh);
+        const now = new Date();
+        const daysSinceRefresh = (now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24);
+
+        if (daysSinceRefresh > 7) {
+            console.log(`Valuations are ${daysSinceRefresh.toFixed(1)} days old, triggering auto-refresh...`);
+            await refreshValuations();
+        } else {
+            lastValuationRefresh = lastRefresh;
+        }
+    }
 
     async function loadPrices() {
         stocksLoading.set(true);
@@ -129,6 +170,75 @@
         if (value === undefined || value === null || value === 0) return '';
         return value >= 0 ? '↑' : '↓';
     }
+
+    // Valuation formatting functions
+    function formatDiscount(value: number | undefined | null): string {
+        if (value === undefined || value === null) return '-';
+        const sign = value < 0 ? '' : '+';
+        return `${sign}${value.toFixed(1)}%`;
+    }
+
+    function getDiscountClass(value: number | undefined | null): string {
+        if (value === undefined || value === null) return '';
+        return value < 0 ? 'positive' : 'negative';  // Undervalued is good (positive)
+    }
+
+    function getDiscountIcon(value: number | undefined | null): string {
+        if (value === undefined || value === null) return '';
+        return value < 0 ? '↓' : '↑';
+    }
+
+    function formatScore(score: number | undefined | null, grade: string | undefined | null): string {
+        if (score === undefined || score === null) return '-';
+        return `${Math.round(score)} ${grade || ''}`;
+    }
+
+    function getGradeClass(grade: string | undefined | null): string {
+        if (!grade) return '';
+        if (grade === 'A' || grade === 'B') return 'positive';
+        if (grade === 'D' || grade === 'F') return 'negative';
+        return '';
+    }
+
+    // Refresh valuations
+    async function refreshValuations() {
+        refreshingValuations = true;
+        refreshError = '';
+        refreshProgress = null;
+
+        const result = await calculator.refreshValuations();
+
+        if (result.error) {
+            refreshError = result.error;
+            refreshingValuations = false;
+            return;
+        }
+
+        // Start polling for progress
+        pollRefreshStatus();
+    }
+
+    async function pollRefreshStatus() {
+        const result = await calculator.getRefreshStatus();
+
+        if (result.error) {
+            refreshError = result.error;
+            refreshingValuations = false;
+            return;
+        }
+
+        refreshProgress = result.data || null;
+
+        if (result.data?.running) {
+            // Continue polling
+            setTimeout(pollRefreshStatus, 1000);
+        } else {
+            // Refresh complete - reload prices to get updated valuations
+            refreshingValuations = false;
+            lastValuationRefresh = result.data?.completed_at || null;
+            await loadPrices();
+        }
+    }
 </script>
 
 <svelte:head>
@@ -160,7 +270,28 @@
                     <polyline points="23 4 23 10 17 10"/>
                     <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                 </svg>
-                Refresh
+                Refresh Prices
+            </button>
+            <button
+                class="btn btn-primary"
+                on:click={refreshValuations}
+                disabled={refreshingValuations}
+            >
+                {#if refreshingValuations}
+                    <svg class="spinner-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="32"/>
+                    </svg>
+                    {#if refreshProgress}
+                        {refreshProgress.current}/{refreshProgress.total}
+                    {:else}
+                        Starting...
+                    {/if}
+                {:else}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+                    </svg>
+                    Refresh Valuations
+                {/if}
             </button>
         </div>
     </div>
@@ -213,6 +344,21 @@
                 >
                     Unchanged <span class="filter-count">{unchangedCount}</span>
                 </button>
+                <span class="filter-divider"></span>
+                <button
+                    class="filter-tab undervalued"
+                    class:active={activeFilter === 'undervalued'}
+                    on:click={() => setFilter('undervalued')}
+                >
+                    Undervalued <span class="filter-count positive">{undervaluedCount}</span>
+                </button>
+                <button
+                    class="filter-tab overvalued"
+                    class:active={activeFilter === 'overvalued'}
+                    on:click={() => setFilter('overvalued')}
+                >
+                    Overvalued <span class="filter-count negative">{overvaluedCount}</span>
+                </button>
             </div>
 
             {#if activeFilter !== 'all' || searchQuery}
@@ -260,8 +406,16 @@
             <span class="results-count">Showing {sortedStocks.length} of {totalStocks} stocks</span>
             {#if sortKey !== 'symbol' || sortDirection !== 'asc'}
                 <span class="sort-indicator">
-                    Sorted by {sortKey === 'change_pct' ? 'change %' : sortKey}
+                    Sorted by {sortKey === 'change_pct' ? 'change %' : sortKey === 'discount_pct' ? 'discount' : sortKey === 'four_m_score' ? 'Phil score' : sortKey}
                     {sortDirection === 'asc' ? '↑' : '↓'}
+                </span>
+            {/if}
+            <span class="valuation-indicator">
+                {valuedCount} with valuations
+            </span>
+            {#if refreshingValuations && refreshProgress}
+                <span class="refresh-indicator">
+                    Calculating: {refreshProgress.current_symbol} ({refreshProgress.progress_percent?.toFixed(0) || 0}%)
                 </span>
             {/if}
         </div>
@@ -321,6 +475,38 @@
                                         </span>
                                     </button>
                                 </th>
+                                <th class="text-right valuation-col">
+                                    <button class="sort-header" on:click={() => handleSort('sticker_price')}>
+                                        Sticker
+                                        <span class="sort-icon" class:active={sortKey === 'sticker_price'}>
+                                            {sortKey === 'sticker_price' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                        </span>
+                                    </button>
+                                </th>
+                                <th class="text-right valuation-col">
+                                    <button class="sort-header" on:click={() => handleSort('margin_of_safety')}>
+                                        MOS
+                                        <span class="sort-icon" class:active={sortKey === 'margin_of_safety'}>
+                                            {sortKey === 'margin_of_safety' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                        </span>
+                                    </button>
+                                </th>
+                                <th class="text-right valuation-col">
+                                    <button class="sort-header" on:click={() => handleSort('discount_pct')}>
+                                        Discount
+                                        <span class="sort-icon" class:active={sortKey === 'discount_pct'}>
+                                            {sortKey === 'discount_pct' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                        </span>
+                                    </button>
+                                </th>
+                                <th class="text-right valuation-col">
+                                    <button class="sort-header" on:click={() => handleSort('four_m_score')}>
+                                        Phil Score
+                                        <span class="sort-icon" class:active={sortKey === 'four_m_score'}>
+                                            {sortKey === 'four_m_score' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                        </span>
+                                    </button>
+                                </th>
                                 <th>Action</th>
                             </tr>
                         </thead>
@@ -355,6 +541,38 @@
                                     <td class="text-right tabular-nums text-muted">{formatPrice(stock.high)}</td>
                                     <td class="text-right tabular-nums text-muted">{formatPrice(stock.low)}</td>
                                     <td class="text-right tabular-nums">{formatVolume(stock.volume)}</td>
+                                    <!-- Valuation columns -->
+                                    <td class="text-right tabular-nums valuation-col" title={stock.valuation_note || ''}>
+                                        {#if stock.valuation_status === 'CALCULABLE'}
+                                            {formatPrice(stock.sticker_price)}
+                                        {:else}
+                                            <span class="text-muted na-value">N/A</span>
+                                        {/if}
+                                    </td>
+                                    <td class="text-right tabular-nums valuation-col" title={stock.valuation_note || ''}>
+                                        {#if stock.valuation_status === 'CALCULABLE'}
+                                            {formatPrice(stock.margin_of_safety)}
+                                        {:else}
+                                            <span class="text-muted na-value">N/A</span>
+                                        {/if}
+                                    </td>
+                                    <td class="text-right valuation-col {getDiscountClass(stock.discount_pct)}" title={stock.valuation_note || ''}>
+                                        {#if stock.valuation_status === 'CALCULABLE' && stock.discount_pct !== null && stock.discount_pct !== undefined}
+                                            <div class="discount-cell">
+                                                <span class="discount-icon">{getDiscountIcon(stock.discount_pct)}</span>
+                                                <span class="tabular-nums">{formatDiscount(stock.discount_pct)}</span>
+                                            </div>
+                                        {:else}
+                                            <span class="text-muted na-value">N/A</span>
+                                        {/if}
+                                    </td>
+                                    <td class="text-right valuation-col {getGradeClass(stock.four_m_grade)}" title={stock.valuation_note || ''}>
+                                        {#if stock.valuation_status === 'CALCULABLE' && stock.four_m_score !== null && stock.four_m_score !== undefined}
+                                            <span class="phil-score tabular-nums">{formatScore(stock.four_m_score, stock.four_m_grade)}</span>
+                                        {:else}
+                                            <span class="text-muted na-value">N/A</span>
+                                        {/if}
+                                    </td>
                                     <td>
                                         <a href="/calculator?symbol={stock.symbol}" class="btn btn-primary btn-sm">
                                             Analyze
@@ -419,7 +637,7 @@
 
 <style>
     .stocks-page {
-        max-width: 1200px;
+        max-width: 1600px;
         margin: 0 auto;
     }
 
@@ -701,6 +919,72 @@
         opacity: 0.8;
     }
 
+    /* Filter Divider */
+    .filter-divider {
+        width: 1px;
+        height: 20px;
+        background: var(--border);
+        margin: 0 0.5rem;
+    }
+
+    /* Valuation indicators in results info */
+    .valuation-indicator {
+        font-size: 0.75rem;
+        color: var(--accent-primary);
+        padding: 0.25rem 0.5rem;
+        background: rgba(99, 102, 241, 0.1);
+        border-radius: var(--radius-sm);
+    }
+
+    .refresh-indicator {
+        font-size: 0.75rem;
+        color: var(--warning);
+        padding: 0.25rem 0.5rem;
+        background: rgba(245, 158, 11, 0.1);
+        border-radius: var(--radius-sm);
+        animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+    }
+
+    /* Spinner animation */
+    .spinner-icon {
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+
+    /* Valuation columns */
+    .valuation-col {
+        white-space: nowrap;
+    }
+
+    .na-value {
+        font-size: 0.75rem;
+        cursor: help;
+    }
+
+    .discount-cell {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 0.25rem;
+    }
+
+    .discount-icon {
+        font-size: 0.75rem;
+    }
+
+    .phil-score {
+        font-weight: 600;
+    }
+
     /* Grid View */
     .stocks-grid {
         display: grid;
@@ -822,11 +1106,19 @@
             gap: 0.5rem;
         }
 
-        /* Hide high/low on mobile */
+        /* Hide high/low and valuation cols on tablet */
         th:nth-child(4),
         td:nth-child(4),
         th:nth-child(5),
-        td:nth-child(5) {
+        td:nth-child(5),
+        /* Hide MOS column (9th) on tablet */
+        th:nth-child(9),
+        td:nth-child(9) {
+            display: none;
+        }
+
+        /* Hide filter divider on mobile */
+        .filter-divider {
             display: none;
         }
 
@@ -835,10 +1127,32 @@
         }
     }
 
+    @media (max-width: 1024px) {
+        /* Hide MOS column on medium screens */
+        th:nth-child(9),
+        td:nth-child(9) {
+            display: none;
+        }
+    }
+
     @media (max-width: 480px) {
         .filter-tab {
             padding: 0.25rem 0.5rem;
             font-size: 0.6875rem;
+        }
+
+        /* Hide more columns on small mobile */
+        th:nth-child(6),
+        td:nth-child(6),
+        th:nth-child(7),
+        td:nth-child(7),
+        th:nth-child(8),
+        td:nth-child(8),
+        th:nth-child(9),
+        td:nth-child(9),
+        th:nth-child(10),
+        td:nth-child(10) {
+            display: none;
         }
 
         .filter-count {

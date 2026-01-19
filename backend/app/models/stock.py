@@ -38,6 +38,12 @@ class Stock(Base):
     recommendation = Column(String(20))  # "STRONG_BUY", "BUY", "HOLD", "SELL"
     discount_to_sticker = Column(Float)  # Percentage
 
+    # Valuation status tracking
+    valuation_status = Column(String(20), default="UNKNOWN")  # CALCULABLE, NOT_CALCULABLE, UNKNOWN
+    valuation_note = Column(String(500))  # Reason if not calculable
+    last_valuation_update = Column(DateTime)
+    four_m_grade = Column(String(2))  # A, B, C, D, F
+
     # Metadata
     is_active = Column(Boolean, default=True)
     last_price_update = Column(DateTime)

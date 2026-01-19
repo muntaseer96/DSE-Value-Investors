@@ -1,13 +1,30 @@
 """Calculator API endpoints - Sticker Price, Big Five, 4Ms."""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from sqlalchemy import func
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
+from datetime import datetime
+import logging
 
 from app.database import get_db
 from app.models import Stock, FinancialData
 from app.services import DSEDataService
 from app.calculations import StickerPriceCalculator, BigFiveCalculator, FourMsEvaluator
+
+logger = logging.getLogger(__name__)
+
+# Global state for tracking valuation refresh progress
+_valuation_progress: Dict[str, Any] = {
+    "running": False,
+    "current": 0,
+    "total": 0,
+    "current_symbol": "",
+    "success_count": 0,
+    "failed_count": 0,
+    "started_at": None,
+    "completed_at": None,
+}
 
 router = APIRouter(prefix="/calculate", tags=["Calculator"])
 
@@ -391,3 +408,305 @@ def get_full_analysis(symbol: str, db: Session = Depends(get_db)):
         "data_years": len(financials),
         "recommendation": sticker_result.recommendation if sticker_result else four_ms_result.recommendation,
     }
+
+
+# ============================================================================
+# Batch Valuation Endpoints
+# ============================================================================
+
+class BatchValuationItem(BaseModel):
+    """Response model for a single stock's valuation."""
+    symbol: str
+    sticker_price: Optional[float] = None
+    margin_of_safety: Optional[float] = None
+    four_m_score: Optional[float] = None
+    four_m_grade: Optional[str] = None
+    recommendation: Optional[str] = None
+    discount_to_sticker: Optional[float] = None
+    valuation_status: str = "UNKNOWN"
+    valuation_note: Optional[str] = None
+    last_valuation_update: Optional[str] = None
+
+
+class BatchValuationsResponse(BaseModel):
+    """Response model for batch valuations."""
+    count: int
+    calculable_count: int
+    not_calculable_count: int
+    last_refresh: Optional[str] = None
+    valuations: List[BatchValuationItem]
+
+
+@router.get("/batch-valuations", response_model=BatchValuationsResponse)
+def get_batch_valuations(db: Session = Depends(get_db)):
+    """Get all pre-calculated valuations from cache (stocks table).
+
+    Returns valuations for all stocks that have been calculated.
+    Fast read from database - no calculations performed.
+    """
+    # Get all stocks with valuations
+    stocks_with_vals = db.query(Stock).filter(
+        Stock.valuation_status.in_(["CALCULABLE", "NOT_CALCULABLE"])
+    ).all()
+
+    valuations = []
+    calculable_count = 0
+    not_calculable_count = 0
+    latest_update = None
+
+    for stock in stocks_with_vals:
+        if stock.valuation_status == "CALCULABLE":
+            calculable_count += 1
+        else:
+            not_calculable_count += 1
+
+        if stock.last_valuation_update:
+            if latest_update is None or stock.last_valuation_update > latest_update:
+                latest_update = stock.last_valuation_update
+
+        valuations.append(BatchValuationItem(
+            symbol=stock.symbol,
+            sticker_price=stock.sticker_price,
+            margin_of_safety=stock.margin_of_safety,
+            four_m_score=stock.four_m_score,
+            four_m_grade=stock.four_m_grade,
+            recommendation=stock.recommendation,
+            discount_to_sticker=stock.discount_to_sticker,
+            valuation_status=stock.valuation_status or "UNKNOWN",
+            valuation_note=stock.valuation_note,
+            last_valuation_update=stock.last_valuation_update.isoformat() if stock.last_valuation_update else None,
+        ))
+
+    return BatchValuationsResponse(
+        count=len(valuations),
+        calculable_count=calculable_count,
+        not_calculable_count=not_calculable_count,
+        last_refresh=latest_update.isoformat() if latest_update else None,
+        valuations=valuations,
+    )
+
+
+@router.post("/refresh-valuations")
+def refresh_valuations(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """Start background refresh of all stock valuations.
+
+    Re-calculates sticker price, 4Ms for all stocks with financial data
+    and updates the stocks table cache.
+
+    Use GET /calculate/refresh-valuations-status to check progress.
+    """
+    global _valuation_progress
+
+    if _valuation_progress["running"]:
+        return {
+            "status": "already_running",
+            "message": "Valuation refresh already in progress",
+            "progress": {
+                "current": _valuation_progress["current"],
+                "total": _valuation_progress["total"],
+                "current_symbol": _valuation_progress["current_symbol"],
+            }
+        }
+
+    # Get all unique symbols from financial_data
+    symbols_query = db.query(FinancialData.stock_symbol).distinct().all()
+    symbols = [s[0] for s in symbols_query if s[0]]
+
+    if not symbols:
+        raise HTTPException(
+            status_code=400,
+            detail="No financial data found. Run fundamentals scrape first."
+        )
+
+    # Reset progress
+    _valuation_progress = {
+        "running": True,
+        "current": 0,
+        "total": len(symbols),
+        "current_symbol": "",
+        "success_count": 0,
+        "failed_count": 0,
+        "started_at": datetime.now().isoformat(),
+        "completed_at": None,
+    }
+
+    # Start background task
+    background_tasks.add_task(_run_valuation_refresh, symbols)
+
+    return {
+        "status": "started",
+        "message": f"Started refreshing valuations for {len(symbols)} stocks",
+        "total_stocks": len(symbols),
+        "check_progress_at": "/calculate/refresh-valuations-status"
+    }
+
+
+@router.get("/refresh-valuations-status")
+def get_refresh_status():
+    """Get current status of valuation refresh operation."""
+    global _valuation_progress
+
+    response = {
+        "running": _valuation_progress["running"],
+        "current": _valuation_progress["current"],
+        "total": _valuation_progress["total"],
+        "current_symbol": _valuation_progress["current_symbol"],
+        "success_count": _valuation_progress["success_count"],
+        "failed_count": _valuation_progress["failed_count"],
+        "started_at": _valuation_progress["started_at"],
+        "completed_at": _valuation_progress["completed_at"],
+    }
+
+    if _valuation_progress["total"] > 0:
+        response["progress_percent"] = round(
+            _valuation_progress["current"] / _valuation_progress["total"] * 100, 1
+        )
+
+    return response
+
+
+def _run_valuation_refresh(symbols: List[str]):
+    """Background task to refresh all valuations."""
+    global _valuation_progress
+
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    data_service = DSEDataService()
+    sticker_calc = StickerPriceCalculator()
+    evaluator = FourMsEvaluator()
+
+    try:
+        for i, symbol in enumerate(symbols):
+            if not _valuation_progress["running"]:
+                break
+
+            _valuation_progress["current_symbol"] = symbol
+
+            try:
+                # Get financial data
+                financials = db.query(FinancialData).filter(
+                    FinancialData.stock_symbol == symbol
+                ).order_by(FinancialData.year.asc()).all()
+
+                if len(financials) < 2:
+                    _update_stock_valuation(
+                        db, symbol,
+                        valuation_status="NOT_CALCULABLE",
+                        valuation_note="Insufficient financial data (need at least 2 years)"
+                    )
+                    _valuation_progress["failed_count"] += 1
+                    _valuation_progress["current"] = i + 1
+                    continue
+
+                # Extract data
+                eps_history = [f.eps for f in financials if f.eps is not None]
+
+                if len(eps_history) < 2:
+                    _update_stock_valuation(
+                        db, symbol,
+                        valuation_status="NOT_CALCULABLE",
+                        valuation_note="Insufficient EPS data"
+                    )
+                    _valuation_progress["failed_count"] += 1
+                    _valuation_progress["current"] = i + 1
+                    continue
+
+                # Calculate sticker price
+                pe_values = [f.pe_ratio for f in financials if f.pe_ratio]
+                historical_pe = sum(pe_values) / len(pe_values) if pe_values else 15.0
+
+                sticker_result = sticker_calc.calculate_from_financials(
+                    eps_history=eps_history,
+                    historical_pe=historical_pe,
+                )
+
+                # If not calculable, save status and continue
+                if sticker_result.status == "NOT_CALCULABLE":
+                    _update_stock_valuation(
+                        db, symbol,
+                        valuation_status="NOT_CALCULABLE",
+                        valuation_note=sticker_result.note or "Sticker price not calculable"
+                    )
+                    _valuation_progress["failed_count"] += 1
+                    _valuation_progress["current"] = i + 1
+                    continue
+
+                # Calculate 4Ms
+                four_ms_result = evaluator.evaluate(
+                    symbol=symbol,
+                    revenue_history=[f.revenue for f in financials if f.revenue],
+                    net_income_history=[f.net_income for f in financials if f.net_income],
+                    roe_history=[f.roe for f in financials if f.roe],
+                    gross_margin_history=[f.gross_margin for f in financials if f.gross_margin],
+                    operating_margin_history=[f.operating_margin for f in financials if f.operating_margin],
+                    debt_to_equity_history=[f.debt_to_equity for f in financials if f.debt_to_equity is not None],
+                    fcf_history=[f.free_cash_flow for f in financials if f.free_cash_flow],
+                    current_price=0,  # Don't need current price for cached score
+                    sticker_price=sticker_result.sticker_price,
+                )
+
+                # Update stock record
+                _update_stock_valuation(
+                    db, symbol,
+                    sticker_price=sticker_result.sticker_price,
+                    margin_of_safety=sticker_result.margin_of_safety,
+                    four_m_score=four_ms_result.overall_score,
+                    four_m_grade=four_ms_result.overall_grade,
+                    recommendation=sticker_result.recommendation or four_ms_result.recommendation,
+                    valuation_status="CALCULABLE",
+                    valuation_note=None,
+                )
+
+                _valuation_progress["success_count"] += 1
+
+            except Exception as e:
+                logger.error(f"Error calculating valuation for {symbol}: {e}")
+                _update_stock_valuation(
+                    db, symbol,
+                    valuation_status="NOT_CALCULABLE",
+                    valuation_note=f"Calculation error: {str(e)[:200]}"
+                )
+                _valuation_progress["failed_count"] += 1
+
+            _valuation_progress["current"] = i + 1
+
+    except Exception as e:
+        logger.error(f"Valuation refresh error: {e}")
+    finally:
+        _valuation_progress["running"] = False
+        _valuation_progress["completed_at"] = datetime.now().isoformat()
+        db.close()
+
+
+def _update_stock_valuation(
+    db: Session,
+    symbol: str,
+    sticker_price: Optional[float] = None,
+    margin_of_safety: Optional[float] = None,
+    four_m_score: Optional[float] = None,
+    four_m_grade: Optional[str] = None,
+    recommendation: Optional[str] = None,
+    valuation_status: str = "UNKNOWN",
+    valuation_note: Optional[str] = None,
+):
+    """Update or create stock record with valuation data."""
+    stock = db.query(Stock).filter(Stock.symbol == symbol).first()
+
+    if not stock:
+        stock = Stock(symbol=symbol)
+        db.add(stock)
+
+    stock.sticker_price = sticker_price
+    stock.margin_of_safety = margin_of_safety
+    stock.four_m_score = four_m_score
+    stock.four_m_grade = four_m_grade
+    stock.recommendation = recommendation
+    stock.valuation_status = valuation_status
+    stock.valuation_note = valuation_note
+    stock.last_valuation_update = datetime.now()
+
+    db.commit()
