@@ -254,28 +254,27 @@ def calculate_four_ms(symbol: str, db: Session = Depends(get_db)):
     operating_margin_history = [f.operating_margin for f in financials if f.operating_margin]
     de_history = [f.debt_to_equity for f in financials if f.debt_to_equity is not None]
     fcf_history = [f.free_cash_flow for f in financials if f.free_cash_flow]
-    eps_history = [f.eps for f in financials if f.eps]
+    eps_history = [f.eps for f in financials if f.eps is not None]
 
     # Get current price
     data_service = DSEDataService()
     price_data = data_service.get_stock_price(symbol)
     current_price = float(price_data.get('ltp', price_data.get('close', 0))) if price_data else 0
 
-    # Calculate sticker price
+    # Calculate sticker price (with quality check)
     sticker_calc = StickerPriceCalculator()
+    sticker_price = 0
 
     if len(eps_history) >= 2:
-        eps_growth = sticker_calc.calculate_cagr(eps_history)
         pe_values = [f.pe_ratio for f in financials if f.pe_ratio]
         historical_pe = sum(pe_values) / len(pe_values) if pe_values else 15.0
-        sticker_result = sticker_calc.calculate(
-            current_eps=eps_history[-1],
-            eps_growth_rate=eps_growth,
+        sticker_result = sticker_calc.calculate_from_financials(
+            eps_history=eps_history,
             historical_pe=historical_pe,
         )
-        sticker_price = sticker_result.sticker_price
-    else:
-        sticker_price = 0
+        # Only use sticker price if calculable
+        if sticker_result.status == "CALCULABLE":
+            sticker_price = sticker_result.sticker_price
 
     # Calculate 4Ms - fully objective
     evaluator = FourMsEvaluator()
@@ -343,18 +342,17 @@ def get_full_analysis(symbol: str, db: Session = Depends(get_db)):
     if price_data:
         current_price = float(price_data.get('ltp', price_data.get('close', 0))) or None
 
-    # Calculate Sticker Price
-    eps_history = [f.eps for f in financials if f.eps]
+    # Calculate Sticker Price (include all EPS values for quality check)
+    eps_history = [f.eps for f in financials if f.eps is not None]
     sticker_calc = StickerPriceCalculator()
 
     sticker_result = None
     if len(eps_history) >= 2:
-        eps_growth = sticker_calc.calculate_cagr(eps_history)
         pe_values = [f.pe_ratio for f in financials if f.pe_ratio]
         historical_pe = sum(pe_values) / len(pe_values) if pe_values else 15.0
-        sticker_result = sticker_calc.calculate(
-            current_eps=eps_history[-1],
-            eps_growth_rate=eps_growth,
+        # Use calculate_from_financials which includes quality check
+        sticker_result = sticker_calc.calculate_from_financials(
+            eps_history=eps_history,
             historical_pe=historical_pe,
             current_price=current_price,
         )
