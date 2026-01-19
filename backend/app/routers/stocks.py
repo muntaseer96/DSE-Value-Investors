@@ -48,6 +48,7 @@ class StockPrice(BaseModel):
     recommendation: Optional[str] = None
     valuation_status: Optional[str] = None
     valuation_note: Optional[str] = None
+    big_five_warning: bool = False  # True if Big Five failed (< 3/5)
 
 
 class StockDetail(BaseModel):
@@ -148,6 +149,7 @@ def get_all_prices(limit: int = Query(default=500, le=500), db: Session = Depend
             recommendation=stock_val.recommendation if stock_val else None,
             valuation_status=stock_val.valuation_status if stock_val else None,
             valuation_note=stock_val.valuation_note if stock_val else None,
+            big_five_warning=stock_val.big_five_warning if stock_val else False,
         )
         prices.append(price)
 

@@ -596,9 +596,14 @@
                                             <span class="text-muted na-value">N/A</span>
                                         {/if}
                                     </td>
-                                    <td class="text-right valuation-col {getGradeClass(stock.four_m_grade)}" title={getValuationTooltip(stock)}>
+                                    <td class="text-right valuation-col {getGradeClass(stock.four_m_grade)}" title={stock.big_five_warning ? 'Big Five failed - score penalized, recommendation capped' : getValuationTooltip(stock)}>
                                         {#if stock.valuation_status === 'CALCULABLE' && stock.four_m_score !== null && stock.four_m_score !== undefined}
-                                            <span class="phil-score tabular-nums">{formatScore(stock.four_m_score, stock.four_m_grade)}</span>
+                                            <span class="phil-score-cell">
+                                                {#if stock.big_five_warning}
+                                                    <span class="big-five-warning" title="Big Five failed (<3/5) - growth metrics declining">⚠️</span>
+                                                {/if}
+                                                <span class="phil-score tabular-nums">{formatScore(stock.four_m_score, stock.four_m_grade)}</span>
+                                            </span>
                                         {:else}
                                             <span class="text-muted na-value">N/A</span>
                                         {/if}
@@ -1027,6 +1032,19 @@
 
     .phil-score {
         font-weight: 600;
+    }
+
+    .phil-score-cell {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        justify-content: flex-end;
+    }
+
+    .big-five-warning {
+        font-size: 0.875rem;
+        cursor: help;
+        filter: grayscale(0.2);
     }
 
     /* Grid View */

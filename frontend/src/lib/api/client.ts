@@ -142,6 +142,7 @@ export interface StockPrice {
     recommendation?: string;
     valuation_status?: 'CALCULABLE' | 'NOT_CALCULABLE' | 'UNKNOWN';
     valuation_note?: string;
+    big_five_warning?: boolean;  // True if Big Five failed (< 3/5)
 }
 
 export interface FundamentalsResponse {
@@ -220,6 +221,10 @@ export interface FourMsResponse {
     overall_grade: string;
     recommendation: string;
     summary: string[];
+    // Big Five validation
+    big_five_score?: number;  // 0-5, how many Big Five metrics passed
+    big_five_penalty?: number;  // Penalty applied to score
+    big_five_warning?: boolean;  // True if Big Five failed (< 3)
 }
 
 export interface MeaningScore {
@@ -289,6 +294,7 @@ export interface BatchValuationItem {
     discount_to_sticker?: number;
     valuation_status: 'CALCULABLE' | 'NOT_CALCULABLE' | 'UNKNOWN';
     valuation_note?: string;
+    big_five_warning?: boolean;  // True if Big Five failed (< 3/5)
     last_valuation_update?: string;
 }
 

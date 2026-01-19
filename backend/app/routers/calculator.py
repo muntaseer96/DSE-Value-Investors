@@ -303,7 +303,7 @@ def calculate_four_ms(symbol: str, db: Session = Depends(get_db)):
         free_cf_history=fcf_history,
     )
 
-    # Calculate 4Ms - pass big_five_passes to cap recommendation if needed
+    # Calculate 4Ms - pass big_five_score to apply penalty and cap recommendation
     evaluator = FourMsEvaluator()
     result = evaluator.evaluate(
         symbol=symbol,
@@ -316,7 +316,7 @@ def calculate_four_ms(symbol: str, db: Session = Depends(get_db)):
         fcf_history=fcf_history,
         current_price=current_price,
         sticker_price=sticker_price,
-        big_five_passes=big_five_result.passes,  # Cap recommendation if Big Five fails
+        big_five_score=big_five_result.score,  # Pass actual score (0-5) for graduated penalty
     )
 
     return result.to_dict()
@@ -396,7 +396,7 @@ def get_full_analysis(symbol: str, db: Session = Depends(get_db)):
     )
 
     # Calculate 4Ms - fully objective
-    # IMPORTANT: Pass big_five_passes to cap recommendation if Big Five fails
+    # IMPORTANT: Pass big_five_score to apply penalty and cap recommendation
     evaluator = FourMsEvaluator()
     four_ms_result = evaluator.evaluate(
         symbol=symbol,
@@ -409,7 +409,7 @@ def get_full_analysis(symbol: str, db: Session = Depends(get_db)):
         fcf_history=[f.free_cash_flow for f in financials if f.free_cash_flow],
         current_price=current_price or 0,
         sticker_price=sticker_result.sticker_price if sticker_result else 0,
-        big_five_passes=big_five_result.passes,  # Cap recommendation if Big Five fails
+        big_five_score=big_five_result.score,  # Pass actual score (0-5) for graduated penalty
     )
 
     # Use 4Ms recommendation (which is already capped if Big Five fails)
@@ -441,6 +441,7 @@ class BatchValuationItem(BaseModel):
     discount_to_sticker: Optional[float] = None
     valuation_status: str = "UNKNOWN"
     valuation_note: Optional[str] = None
+    big_five_warning: bool = False  # True if Big Five failed (< 3/5)
     last_valuation_update: Optional[str] = None
 
 
@@ -490,6 +491,7 @@ def get_batch_valuations(db: Session = Depends(get_db)):
             discount_to_sticker=stock.discount_to_sticker,
             valuation_status=stock.valuation_status or "UNKNOWN",
             valuation_note=stock.valuation_note,
+            big_five_warning=stock.big_five_warning or False,
             last_valuation_update=stock.last_valuation_update.isoformat() if stock.last_valuation_update else None,
         ))
 
@@ -661,7 +663,7 @@ def _run_valuation_refresh(symbols: List[str]):
                     free_cf_history=[f.free_cash_flow for f in financials if f.free_cash_flow],
                 )
 
-                # Calculate 4Ms - pass big_five_passes to cap recommendation if needed
+                # Calculate 4Ms - pass big_five_score to apply penalty and cap recommendation
                 four_ms_result = evaluator.evaluate(
                     symbol=symbol,
                     revenue_history=[f.revenue for f in financials if f.revenue],
@@ -673,10 +675,11 @@ def _run_valuation_refresh(symbols: List[str]):
                     fcf_history=[f.free_cash_flow for f in financials if f.free_cash_flow],
                     current_price=0,  # Don't need current price for cached score
                     sticker_price=sticker_result.sticker_price,
-                    big_five_passes=big_five_result.passes,  # Cap recommendation if Big Five fails
+                    big_five_score=big_five_result.score,  # Pass actual score (0-5) for graduated penalty
                 )
 
                 # Update stock record - use 4Ms recommendation (already capped if Big Five fails)
+                # Include big_five_warning for frontend display
                 _update_stock_valuation(
                     db, symbol,
                     sticker_price=sticker_result.sticker_price,
@@ -685,7 +688,8 @@ def _run_valuation_refresh(symbols: List[str]):
                     four_m_grade=four_ms_result.overall_grade,
                     recommendation=four_ms_result.recommendation,
                     valuation_status="CALCULABLE",
-                    valuation_note=None if big_five_result.passes else "Big Five failed - recommendation capped",
+                    valuation_note=f"Big Five: {big_five_result.score}/5" + (f" (penalty -{four_ms_result.big_five_penalty})" if four_ms_result.big_five_warning else ""),
+                    big_five_warning=four_ms_result.big_five_warning,
                 )
 
                 _valuation_progress["success_count"] += 1
@@ -719,6 +723,7 @@ def _update_stock_valuation(
     recommendation: Optional[str] = None,
     valuation_status: str = "UNKNOWN",
     valuation_note: Optional[str] = None,
+    big_five_warning: bool = False,
 ):
     """Update or create stock record with valuation data."""
     stock = db.query(Stock).filter(Stock.symbol == symbol).first()
@@ -734,6 +739,7 @@ def _update_stock_valuation(
     stock.recommendation = recommendation
     stock.valuation_status = valuation_status
     stock.valuation_note = valuation_note
+    stock.big_five_warning = big_five_warning
     stock.last_valuation_update = datetime.now()
 
     db.commit()

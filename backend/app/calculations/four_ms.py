@@ -159,6 +159,11 @@ class FourMsResult:
     recommendation: str
     summary: List[str]
 
+    # Big Five validation fields
+    big_five_score: int = 5  # 0-5, how many Big Five metrics passed
+    big_five_penalty: int = 0  # Penalty applied to overall score
+    big_five_warning: bool = False  # True if Big Five failed (< 3)
+
     def to_dict(self):
         return {
             "meaning": self.meaning.to_dict(),
@@ -169,6 +174,9 @@ class FourMsResult:
             "overall_grade": self.overall_grade,
             "recommendation": self.recommendation,
             "summary": self.summary,
+            "big_five_score": self.big_five_score,
+            "big_five_penalty": self.big_five_penalty,
+            "big_five_warning": self.big_five_warning,
         }
 
 
@@ -646,7 +654,7 @@ class FourMsEvaluator:
         current_price: float = 0,
         sticker_price: float = 0,
         # Big Five validation
-        big_five_passes: bool = True,  # If False, cap recommendation at HOLD
+        big_five_score: int = 5,  # 0-5, how many Big Five metrics passed
     ) -> FourMsResult:
         """Complete Four Ms evaluation - 100% objective.
 
@@ -656,8 +664,9 @@ class FourMsEvaluator:
         - Management: 20%
         - MOS: 30%
 
-        IMPORTANT: If Big Five fails (< 3/5 metrics at 10%+ growth),
-        recommendation is capped at HOLD regardless of MOS score.
+        IMPORTANT: If Big Five fails (< 3/5 metrics at 10%+ growth):
+        1. Apply graduated penalty to score: 2/5=-10, 1/5=-20, 0/5=-30
+        2. Cap recommendation at HOLD regardless of MOS score
         """
         # Default empty lists
         revenue_history = revenue_history or []
@@ -680,15 +689,29 @@ class FourMsEvaluator:
         )
         mos = self.evaluate_mos(current_price, sticker_price)
 
-        # Calculate overall score (weighted average)
+        # Calculate base overall score (weighted average)
         # Meaning: 20%, Moat: 30%, Management: 20%, MOS: 30%
-        overall_score = (
+        base_score = (
             meaning.score * 0.20 +
             moat.score * 0.30 +
             management.score * 0.20 +
             mos.score * 0.30
         )
 
+        # Apply Big Five penalty if score < 3 (failed)
+        # Graduated penalty: 2/5=-10, 1/5=-20, 0/5=-30
+        big_five_warning = big_five_score < 3
+        if big_five_score == 2:
+            big_five_penalty = 10
+        elif big_five_score == 1:
+            big_five_penalty = 20
+        elif big_five_score == 0:
+            big_five_penalty = 30
+        else:
+            big_five_penalty = 0
+
+        # Apply penalty (minimum score is 0)
+        overall_score = max(0, base_score - big_five_penalty)
         overall_grade = _score_to_grade(overall_score)
 
         # Generate summary
@@ -712,13 +735,13 @@ class FourMsEvaluator:
 
         # Final recommendation based on MOS and overall score
         # IMPORTANT: Cap at HOLD if Big Five fails (< 3/5 passing)
-        if not big_five_passes:
+        if big_five_warning:
             # Big Five failed - can't trust sticker price, cap at HOLD
             if mos.recommendation == "SELL" or overall_score < 40:
                 recommendation = "AVOID"
             else:
                 recommendation = "HOLD"
-            summary.insert(0, "⚠️ Big Five failed - recommendation capped at HOLD")
+            summary.insert(0, f"⚠️ Big Five failed ({big_five_score}/5) - score penalty -{big_five_penalty}, recommendation capped")
         elif mos.recommendation in ["STRONG_BUY", "BUY"] and overall_score >= 60:
             recommendation = mos.recommendation
         elif mos.recommendation == "SELL" or overall_score < 40:
@@ -735,4 +758,7 @@ class FourMsEvaluator:
             overall_grade=overall_grade,
             recommendation=recommendation,
             summary=summary,
+            big_five_score=big_five_score,
+            big_five_penalty=big_five_penalty,
+            big_five_warning=big_five_warning,
         )

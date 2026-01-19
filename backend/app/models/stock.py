@@ -43,6 +43,7 @@ class Stock(Base):
     valuation_note = Column(String(500))  # Reason if not calculable
     last_valuation_update = Column(DateTime)
     four_m_grade = Column(String(2))  # A, B, C, D, F
+    big_five_warning = Column(Boolean, default=False)  # True if Big Five failed (< 3/5)
 
     # Metadata
     is_active = Column(Boolean, default=True)
