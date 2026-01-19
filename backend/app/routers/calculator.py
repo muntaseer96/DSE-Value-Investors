@@ -293,7 +293,17 @@ def calculate_four_ms(symbol: str, db: Session = Depends(get_db)):
         if sticker_result.status == "CALCULABLE":
             sticker_price = sticker_result.sticker_price
 
-    # Calculate 4Ms - fully objective
+    # Calculate Big Five to check if it passes
+    big_five_calc = BigFiveCalculator()
+    big_five_result = big_five_calc.calculate(
+        revenue_history=revenue_history,
+        eps_history=eps_history,
+        equity_history=[f.total_equity for f in financials if f.total_equity],
+        operating_cf_history=[f.operating_cash_flow for f in financials if f.operating_cash_flow],
+        free_cf_history=fcf_history,
+    )
+
+    # Calculate 4Ms - pass big_five_passes to cap recommendation if needed
     evaluator = FourMsEvaluator()
     result = evaluator.evaluate(
         symbol=symbol,
@@ -306,6 +316,7 @@ def calculate_four_ms(symbol: str, db: Session = Depends(get_db)):
         fcf_history=fcf_history,
         current_price=current_price,
         sticker_price=sticker_price,
+        big_five_passes=big_five_result.passes,  # Cap recommendation if Big Five fails
     )
 
     return result.to_dict()
@@ -385,6 +396,7 @@ def get_full_analysis(symbol: str, db: Session = Depends(get_db)):
     )
 
     # Calculate 4Ms - fully objective
+    # IMPORTANT: Pass big_five_passes to cap recommendation if Big Five fails
     evaluator = FourMsEvaluator()
     four_ms_result = evaluator.evaluate(
         symbol=symbol,
@@ -397,7 +409,11 @@ def get_full_analysis(symbol: str, db: Session = Depends(get_db)):
         fcf_history=[f.free_cash_flow for f in financials if f.free_cash_flow],
         current_price=current_price or 0,
         sticker_price=sticker_result.sticker_price if sticker_result else 0,
+        big_five_passes=big_five_result.passes,  # Cap recommendation if Big Five fails
     )
+
+    # Use 4Ms recommendation (which is already capped if Big Five fails)
+    final_recommendation = four_ms_result.recommendation
 
     return {
         "symbol": symbol,
@@ -406,7 +422,7 @@ def get_full_analysis(symbol: str, db: Session = Depends(get_db)):
         "big_five": big_five_result.to_dict(),
         "four_ms": four_ms_result.to_dict(),
         "data_years": len(financials),
-        "recommendation": sticker_result.recommendation if sticker_result else four_ms_result.recommendation,
+        "recommendation": final_recommendation,
     }
 
 
@@ -635,7 +651,17 @@ def _run_valuation_refresh(symbols: List[str]):
                     _valuation_progress["current"] = i + 1
                     continue
 
-                # Calculate 4Ms
+                # Calculate Big Five to check if it passes
+                big_five_calc = BigFiveCalculator()
+                big_five_result = big_five_calc.calculate(
+                    revenue_history=[f.revenue for f in financials if f.revenue],
+                    eps_history=eps_history,
+                    equity_history=[f.total_equity for f in financials if f.total_equity],
+                    operating_cf_history=[f.operating_cash_flow for f in financials if f.operating_cash_flow],
+                    free_cf_history=[f.free_cash_flow for f in financials if f.free_cash_flow],
+                )
+
+                # Calculate 4Ms - pass big_five_passes to cap recommendation if needed
                 four_ms_result = evaluator.evaluate(
                     symbol=symbol,
                     revenue_history=[f.revenue for f in financials if f.revenue],
@@ -647,18 +673,19 @@ def _run_valuation_refresh(symbols: List[str]):
                     fcf_history=[f.free_cash_flow for f in financials if f.free_cash_flow],
                     current_price=0,  # Don't need current price for cached score
                     sticker_price=sticker_result.sticker_price,
+                    big_five_passes=big_five_result.passes,  # Cap recommendation if Big Five fails
                 )
 
-                # Update stock record
+                # Update stock record - use 4Ms recommendation (already capped if Big Five fails)
                 _update_stock_valuation(
                     db, symbol,
                     sticker_price=sticker_result.sticker_price,
                     margin_of_safety=sticker_result.margin_of_safety,
                     four_m_score=four_ms_result.overall_score,
                     four_m_grade=four_ms_result.overall_grade,
-                    recommendation=sticker_result.recommendation or four_ms_result.recommendation,
+                    recommendation=four_ms_result.recommendation,
                     valuation_status="CALCULABLE",
-                    valuation_note=None,
+                    valuation_note=None if big_five_result.passes else "Big Five failed - recommendation capped",
                 )
 
                 _valuation_progress["success_count"] += 1

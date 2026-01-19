@@ -645,6 +645,8 @@ class FourMsEvaluator:
         # Margin of Safety
         current_price: float = 0,
         sticker_price: float = 0,
+        # Big Five validation
+        big_five_passes: bool = True,  # If False, cap recommendation at HOLD
     ) -> FourMsResult:
         """Complete Four Ms evaluation - 100% objective.
 
@@ -653,6 +655,9 @@ class FourMsEvaluator:
         - Moat: 30%
         - Management: 20%
         - MOS: 30%
+
+        IMPORTANT: If Big Five fails (< 3/5 metrics at 10%+ growth),
+        recommendation is capped at HOLD regardless of MOS score.
         """
         # Default empty lists
         revenue_history = revenue_history or []
@@ -706,7 +711,15 @@ class FourMsEvaluator:
             summary.append(mos.notes[0])
 
         # Final recommendation based on MOS and overall score
-        if mos.recommendation in ["STRONG_BUY", "BUY"] and overall_score >= 60:
+        # IMPORTANT: Cap at HOLD if Big Five fails (< 3/5 passing)
+        if not big_five_passes:
+            # Big Five failed - can't trust sticker price, cap at HOLD
+            if mos.recommendation == "SELL" or overall_score < 40:
+                recommendation = "AVOID"
+            else:
+                recommendation = "HOLD"
+            summary.insert(0, "⚠️ Big Five failed - recommendation capped at HOLD")
+        elif mos.recommendation in ["STRONG_BUY", "BUY"] and overall_score >= 60:
             recommendation = mos.recommendation
         elif mos.recommendation == "SELL" or overall_score < 40:
             recommendation = "AVOID"
