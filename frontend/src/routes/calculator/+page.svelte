@@ -272,9 +272,13 @@
                         </div>
                         <div class="price-label">Current Price</div>
                         <div class="price-value">{formatCurrency(stickerResult.current_price)}</div>
-                        {#if stickerResult.discount_to_sticker}
+                        {#if stickerResult.sticker_price > 0 && stickerResult.discount_to_sticker}
                             <div class="price-note {stickerResult.discount_to_sticker > 0 ? 'positive' : 'negative'}">
                                 {stickerResult.discount_to_sticker > 0 ? 'Undervalued' : 'Overvalued'} by {Math.abs(stickerResult.discount_to_sticker).toFixed(1)}%
+                            </div>
+                        {:else if stickerResult.sticker_price <= 0}
+                            <div class="price-note negative">
+                                Cannot value - negative earnings
                             </div>
                         {/if}
                     </div>
