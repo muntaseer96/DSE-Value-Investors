@@ -94,6 +94,9 @@ export const usStocks = {
     getFilterCounts: () => request<USFilterCountsResponse>('/us-stocks/filter-counts'),
     getPrice: (symbol: string) => request<USStockPrice>(`/us-stocks/${symbol}`),
     getFundamentals: (symbol: string) => request<USFundamentalsResponse>(`/us-stocks/${symbol}/fundamentals`),
+    getBigFive: (symbol: string) => request<BigFiveResponse>(`/us-stocks/${symbol}/big-five`),
+    getFourMs: (symbol: string) => request<FourMsResponse>(`/us-stocks/${symbol}/four-ms`),
+    getAnalysis: (symbol: string) => request<USFullAnalysisResponse>(`/us-stocks/${symbol}/analysis`),
     seed: (sp500Only?: boolean) => request<USSeedResponse>('/us-stocks/seed', {
         method: 'POST',
         body: JSON.stringify({ sp500_only: sp500Only || false }),
@@ -487,4 +490,17 @@ export interface USScrapeStatusResponse {
     progress_percent?: number;
     started_at?: string;
     completed: boolean;
+}
+
+export interface USFullAnalysisResponse {
+    symbol: string;
+    name?: string;
+    sector?: string;
+    is_sp500: boolean;
+    current_price?: number;
+    sticker_price?: StickerPriceResponse;
+    big_five: BigFiveResponse;
+    four_ms: FourMsResponse;
+    data_years: number;
+    recommendation: string;
 }
