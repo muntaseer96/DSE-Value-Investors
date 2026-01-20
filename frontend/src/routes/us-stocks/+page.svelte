@@ -587,6 +587,7 @@
                                     </button>
                                 </th>
                                 <th>Status</th>
+                                <th>Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -668,6 +669,11 @@
                                         {:else}
                                             <span class="status-badge status-pending">Pending</span>
                                         {/if}
+                                    </td>
+                                    <td>
+                                        <a href="/us-stocks/{stock.symbol}" class="btn btn-primary btn-sm">
+                                            Analyze
+                                        </a>
                                     </td>
                                 </tr>
                             {/each}
