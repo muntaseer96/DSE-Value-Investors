@@ -54,5 +54,5 @@ jobs:
           echo "Waiting 30 seconds before checking progress..."
           sleep 30
 
-          PROGRESS=$(curl -s "https://dse-value-investors-production.up.railway.app/us-stocks/scrape-status")
-          echo "Progress: $PROGRESS" | jq .
+          echo "Progress:"
+          curl -s "https://dse-value-investors-production.up.railway.app/us-stocks/scrape-status" | jq .
