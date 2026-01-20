@@ -12,6 +12,7 @@
     let offset = 0;
     let limit = 100;
     let totalCount = 0;
+    let totalValuationCount = 0;
     let hasMore = false;
 
     // Sorting
@@ -98,6 +99,12 @@
         const countResult = await usStocks.getCount();
         if (countResult.data) {
             totalCount = countResult.data.total;
+        }
+
+        // Get count with valuations
+        const valuationCountResult = await usStocks.getCount(false, true);
+        if (valuationCountResult.data) {
+            totalValuationCount = valuationCountResult.data.total;
         }
 
         loading = false;
@@ -196,6 +203,18 @@
     function getValuationTooltip(stock: USStockPrice): string {
         if (stock.valuation_status === 'CALCULABLE') return '';
         return stock.valuation_note || (stock.valuation_status === 'NOT_CALCULABLE' ? 'Not calculable' : 'Pending data fetch');
+    }
+
+    function getRecommendationClass(rec: string | undefined | null): string {
+        if (!rec) return 'rec-hold';
+        switch (rec.toUpperCase()) {
+            case 'STRONG_BUY': return 'rec-strong-buy';
+            case 'BUY': return 'rec-buy';
+            case 'HOLD': return 'rec-hold';
+            case 'SELL': return 'rec-sell';
+            case 'STRONG_SELL': return 'rec-strong-sell';
+            default: return 'rec-hold';
+        }
     }
 
     // Seed and Scrape
@@ -470,7 +489,7 @@
                 </span>
             {/if}
             <span class="valuation-indicator">
-                {valuedCount} with valuations
+                {totalValuationCount} with valuations
             </span>
             {#if scraping && scrapeProgress}
                 <span class="refresh-indicator">
@@ -626,7 +645,7 @@
                                     </td>
                                     <td>
                                         {#if stock.valuation_status === 'CALCULABLE'}
-                                            <span class="status-badge status-ready">{stock.recommendation || 'HOLD'}</span>
+                                            <span class="status-badge {getRecommendationClass(stock.recommendation)}">{stock.recommendation?.replace('_', ' ') || 'HOLD'}</span>
                                         {:else if stock.valuation_status === 'NOT_CALCULABLE'}
                                             <span class="status-badge status-error" title={stock.valuation_note}>N/A</span>
                                         {:else}
@@ -1106,6 +1125,34 @@
     .status-error {
         background: rgba(220, 38, 38, 0.12);
         color: var(--danger);
+    }
+
+    /* Recommendation badges */
+    .rec-strong-buy {
+        background: rgba(5, 150, 105, 0.2);
+        color: #059669;
+        font-weight: 700;
+    }
+
+    .rec-buy {
+        background: rgba(16, 185, 129, 0.15);
+        color: #10b981;
+    }
+
+    .rec-hold {
+        background: rgba(245, 158, 11, 0.12);
+        color: var(--warning);
+    }
+
+    .rec-sell {
+        background: rgba(249, 115, 22, 0.15);
+        color: #f97316;
+    }
+
+    .rec-strong-sell {
+        background: rgba(220, 38, 38, 0.2);
+        color: #dc2626;
+        font-weight: 700;
     }
 
     .load-more {

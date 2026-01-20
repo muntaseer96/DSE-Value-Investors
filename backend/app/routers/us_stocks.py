@@ -725,27 +725,34 @@ def _calculate_us_valuations(db: Session, symbol: str):
 
 
 def _get_recommendation(discount_pct: Optional[float], big_five_warning: bool, grade: Optional[str]) -> str:
-    """Determine investment recommendation."""
+    """Determine investment recommendation.
+
+    discount_pct is calculated as: (sticker_price - current_price) / sticker_price * 100
+    - Positive = undervalued (price below sticker) = good
+    - Negative = overvalued (price above sticker) = bad
+    """
     if discount_pct is None:
         return "HOLD"
 
-    # Cap at HOLD if Big Five fails
+    # Cap at HOLD if Big Five fails (even if undervalued)
     if big_five_warning:
-        if discount_pct <= -50:
+        if discount_pct >= 50:
             return "HOLD"  # Would be STRONG_BUY but capped due to Big Five
         return "HOLD"
 
     # Normal recommendation logic
-    if discount_pct <= -50:
-        return "STRONG_BUY"
-    elif discount_pct <= -30:
-        return "BUY"
-    elif discount_pct <= 30:
-        return "HOLD"
-    elif discount_pct <= 50:
-        return "SELL"
+    # Positive discount = undervalued = BUY territory
+    # Negative discount = overvalued = SELL territory
+    if discount_pct >= 50:
+        return "STRONG_BUY"  # 50%+ below sticker price
+    elif discount_pct >= 30:
+        return "BUY"  # 30-50% below sticker
+    elif discount_pct >= -30:
+        return "HOLD"  # Within 30% of sticker (either direction)
+    elif discount_pct >= -50:
+        return "SELL"  # 30-50% above sticker
     else:
-        return "STRONG_SELL"
+        return "STRONG_SELL"  # 50%+ above sticker price
 
 
 # ============================================================================
