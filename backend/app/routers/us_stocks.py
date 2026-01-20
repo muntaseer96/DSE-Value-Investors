@@ -674,13 +674,27 @@ def _calculate_us_valuations(db: Session, symbol: str):
             stock.margin_of_safety = sticker_result.margin_of_safety
             stock.discount_to_sticker = sticker_result.discount_to_sticker
 
-            # Calculate 4Ms
+            # Calculate 4Ms - extract history arrays from fin_data
+            revenue_history = [f.get("revenue") for f in fin_data if f.get("revenue") is not None]
+            net_income_history = [f.get("net_income") for f in fin_data if f.get("net_income") is not None]
+            roe_history = [f.get("roe") for f in fin_data if f.get("roe") is not None]
+            gross_margin_history = [f.get("gross_margin") for f in fin_data if f.get("gross_margin") is not None]
+            operating_margin_history = [f.get("operating_margin") for f in fin_data if f.get("operating_margin") is not None]
+            debt_to_equity_history = [f.get("debt_to_equity") for f in fin_data if f.get("debt_to_equity") is not None]
+            fcf_history = [f.get("free_cash_flow") for f in fin_data if f.get("free_cash_flow") is not None]
+
             four_ms_eval = FourMsEvaluator()
             four_ms_result = four_ms_eval.evaluate(
-                financial_data=fin_data,
-                current_price=stock.current_price,
+                symbol=symbol,
+                revenue_history=revenue_history,
+                net_income_history=net_income_history,
+                roe_history=roe_history,
+                gross_margin_history=gross_margin_history,
+                operating_margin_history=operating_margin_history,
+                debt_to_equity_history=debt_to_equity_history,
+                fcf_history=fcf_history,
+                current_price=stock.current_price or 0,
                 sticker_price=sticker_result.sticker_price,
-                margin_of_safety=sticker_result.margin_of_safety,
                 big_five_score=big_five_result.score,
             )
 
