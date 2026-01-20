@@ -63,14 +63,25 @@
                 <span class="nav-label">Portfolio</span>
             </a>
 
-            <a href="/stocks" class="nav-item" class:active={currentPath.startsWith('/stocks')} on:click={closeMobileMenu}>
+            <a href="/stocks" class="nav-item" class:active={currentPath === '/stocks' || currentPath.startsWith('/stocks/')} on:click={closeMobileMenu}>
                 <span class="nav-icon">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
                         <polyline points="16 7 22 7 22 13"/>
                     </svg>
                 </span>
-                <span class="nav-label">Stocks</span>
+                <span class="nav-label">DSE Stocks</span>
+            </a>
+
+            <a href="/us-stocks" class="nav-item" class:active={currentPath.startsWith('/us-stocks')} on:click={closeMobileMenu}>
+                <span class="nav-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="2" y1="12" x2="22" y2="12"/>
+                        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                    </svg>
+                </span>
+                <span class="nav-label">US Stocks</span>
             </a>
 
             <a href="/calculator" class="nav-item" class:active={currentPath === '/calculator'} on:click={closeMobileMenu}>
