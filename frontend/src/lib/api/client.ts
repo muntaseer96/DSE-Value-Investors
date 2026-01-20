@@ -88,6 +88,7 @@ export const usStocks = {
         return request<USStockCountResponse>(`/us-stocks/count${query}`);
     },
     getSectors: () => request<{sectors: string[]}>('/us-stocks/sectors'),
+    getFilterCounts: () => request<USFilterCountsResponse>('/us-stocks/filter-counts'),
     getPrice: (symbol: string) => request<USStockPrice>(`/us-stocks/${symbol}`),
     getFundamentals: (symbol: string) => request<USFundamentalsResponse>(`/us-stocks/${symbol}/fundamentals`),
     seed: (sp500Only?: boolean) => request<USSeedResponse>('/us-stocks/seed', {
@@ -406,6 +407,16 @@ export interface USStockCountResponse {
     total: number;
     sp500_only: boolean;
     has_valuation: boolean;
+}
+
+export interface USFilterCountsResponse {
+    total: number;
+    sp500: number;
+    gainers: number;
+    losers: number;
+    undervalued: number;
+    overvalued: number;
+    with_valuation: number;
 }
 
 export interface USFundamentalsResponse {

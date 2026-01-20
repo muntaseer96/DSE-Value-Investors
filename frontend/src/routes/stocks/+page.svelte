@@ -906,6 +906,20 @@
 
     .table-container {
         overflow-x: auto;
+        max-height: calc(100vh - 300px);
+        overflow-y: auto;
+    }
+
+    thead {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: var(--bg-card);
+    }
+
+    thead th {
+        background: var(--bg-card);
+        box-shadow: 0 1px 0 var(--border);
     }
 
     th:first-child,

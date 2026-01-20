@@ -191,6 +191,36 @@ def get_us_stock_count(
     }
 
 
+@router.get("/filter-counts")
+def get_us_filter_counts(db: Session = Depends(get_db)):
+    """Get counts for all filter categories in one request.
+
+    Returns counts for: total, sp500, gainers, losers, undervalued, overvalued, with_valuation
+    """
+    result = db.execute(text("""
+        SELECT
+            COUNT(*) as total,
+            COUNT(*) FILTER (WHERE is_sp500 = TRUE) as sp500,
+            COUNT(*) FILTER (WHERE change > 0) as gainers,
+            COUNT(*) FILTER (WHERE change < 0) as losers,
+            COUNT(*) FILTER (WHERE valuation_status = 'CALCULABLE' AND discount_pct < 0) as undervalued,
+            COUNT(*) FILTER (WHERE valuation_status = 'CALCULABLE' AND discount_pct > 0) as overvalued,
+            COUNT(*) FILTER (WHERE valuation_status = 'CALCULABLE') as with_valuation
+        FROM us_stocks
+    """))
+    row = result.fetchone()
+
+    return {
+        "total": row[0] if row else 0,
+        "sp500": row[1] if row else 0,
+        "gainers": row[2] if row else 0,
+        "losers": row[3] if row else 0,
+        "undervalued": row[4] if row else 0,
+        "overvalued": row[5] if row else 0,
+        "with_valuation": row[6] if row else 0,
+    }
+
+
 @router.get("/sectors")
 def get_us_sectors(db: Session = Depends(get_db)):
     """Get list of unique sectors."""

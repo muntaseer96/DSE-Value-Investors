@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { usStocks, type USStockPrice, type USScrapeStatusResponse } from '$lib/api/client';
+    import { usStocks, type USStockPrice, type USScrapeStatusResponse, type USFilterCountsResponse } from '$lib/api/client';
 
     let priceData: USStockPrice[] = [];
     let loading = true;
@@ -14,6 +14,17 @@
     let totalCount = 0;
     let totalValuationCount = 0;
     let hasMore = false;
+
+    // Filter counts from database (not from loaded data)
+    let filterCounts: USFilterCountsResponse = {
+        total: 0,
+        sp500: 0,
+        gainers: 0,
+        losers: 0,
+        undervalued: 0,
+        overvalued: 0,
+        with_valuation: 0,
+    };
 
     // Sorting
     type SortKey = 'symbol' | 'current_price' | 'change' | 'change_pct' | 'market_cap' | 'sticker_price' | 'margin_of_safety' | 'discount_pct' | 'four_m_score';
@@ -63,14 +74,8 @@
         return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
     });
 
-    // Stats
-    $: totalStocks = priceData.length;
-    $: sp500Count = priceData.filter(s => s.is_sp500).length;
-    $: gainersCount = priceData.filter(s => (s.change ?? 0) > 0).length;
-    $: losersCount = priceData.filter(s => (s.change ?? 0) < 0).length;
-    $: undervaluedCount = priceData.filter(s => s.valuation_status === 'CALCULABLE' && (s.discount_pct ?? 0) < 0).length;
-    $: overvaluedCount = priceData.filter(s => s.valuation_status === 'CALCULABLE' && (s.discount_pct ?? 0) > 0).length;
-    $: valuedCount = priceData.filter(s => s.valuation_status === 'CALCULABLE').length;
+    // Stats from loaded data (for display purposes only)
+    $: loadedStocksCount = priceData.length;
 
     onMount(async () => {
         await loadPrices();
@@ -95,16 +100,12 @@
             hasMore = result.data.length === limit;
         }
 
-        // Get total count
-        const countResult = await usStocks.getCount();
-        if (countResult.data) {
-            totalCount = countResult.data.total;
-        }
-
-        // Get count with valuations
-        const valuationCountResult = await usStocks.getCount(false, true);
-        if (valuationCountResult.data) {
-            totalValuationCount = valuationCountResult.data.total;
+        // Get all filter counts in one request
+        const filterCountsResult = await usStocks.getFilterCounts();
+        if (filterCountsResult.data) {
+            filterCounts = filterCountsResult.data;
+            totalCount = filterCountsResult.data.total;
+            totalValuationCount = filterCountsResult.data.with_valuation;
         }
 
         loading = false;
@@ -386,28 +387,28 @@
                     class:active={activeFilter === 'all'}
                     on:click={() => setFilter('all')}
                 >
-                    All <span class="filter-count">{totalStocks}</span>
+                    All <span class="filter-count">{filterCounts.total.toLocaleString()}</span>
                 </button>
                 <button
                     class="filter-tab sp500"
                     class:active={activeFilter === 'sp500'}
                     on:click={() => setFilter('sp500')}
                 >
-                    S&P 500 <span class="filter-count">{sp500Count}</span>
+                    S&P 500 <span class="filter-count">{filterCounts.sp500}</span>
                 </button>
                 <button
                     class="filter-tab gainers"
                     class:active={activeFilter === 'gainers'}
                     on:click={() => setFilter('gainers')}
                 >
-                    Gainers <span class="filter-count positive">{gainersCount}</span>
+                    Gainers <span class="filter-count positive">{filterCounts.gainers}</span>
                 </button>
                 <button
                     class="filter-tab losers"
                     class:active={activeFilter === 'losers'}
                     on:click={() => setFilter('losers')}
                 >
-                    Losers <span class="filter-count negative">{losersCount}</span>
+                    Losers <span class="filter-count negative">{filterCounts.losers}</span>
                 </button>
                 <span class="filter-divider"></span>
                 <button
@@ -415,14 +416,14 @@
                     class:active={activeFilter === 'undervalued'}
                     on:click={() => setFilter('undervalued')}
                 >
-                    Undervalued <span class="filter-count positive">{undervaluedCount}</span>
+                    Undervalued <span class="filter-count positive">{filterCounts.undervalued}</span>
                 </button>
                 <button
                     class="filter-tab overvalued"
                     class:active={activeFilter === 'overvalued'}
                     on:click={() => setFilter('overvalued')}
                 >
-                    Overvalued <span class="filter-count negative">{overvaluedCount}</span>
+                    Overvalued <span class="filter-count negative">{filterCounts.overvalued}</span>
                 </button>
             </div>
 
@@ -1002,6 +1003,20 @@
 
     .table-container {
         overflow-x: auto;
+        max-height: calc(100vh - 300px);
+        overflow-y: auto;
+    }
+
+    thead {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: var(--bg-card);
+    }
+
+    thead th {
+        background: var(--bg-card);
+        box-shadow: 0 1px 0 var(--border);
     }
 
     th:first-child,
