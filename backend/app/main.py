@@ -9,6 +9,7 @@ import os
 
 from app.database import init_db
 from app.routers import portfolio, stocks, calculator
+from app.routers import us_stocks
 from app.config import get_settings
 
 settings = get_settings()
@@ -62,11 +63,25 @@ async def startup_event():
     """Initialize database tables on startup."""
     init_db()
 
+    # Start scheduler for automated tasks (US stocks scraping)
+    if settings.us_stocks_enabled and settings.finnhub_api_key:
+        from app.scheduler import start_scheduler
+        start_scheduler()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown."""
+    if settings.us_stocks_enabled:
+        from app.scheduler import stop_scheduler
+        stop_scheduler()
+
 
 # Include routers
 app.include_router(portfolio.router)
 app.include_router(stocks.router)
 app.include_router(calculator.router)
+app.include_router(us_stocks.router)
 
 
 # Health check endpoint

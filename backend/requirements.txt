@@ -34,3 +34,7 @@ pydantic-settings
 playwright>=1.40.0
 beautifulsoup4
 lxml
+
+# Scheduling (US stocks automated scraping)
+apscheduler>=3.10.0
+pytz

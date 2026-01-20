@@ -1,132 +1,124 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { stocks, calculator, type StockPrice, type RefreshStatusResponse } from '$lib/api/client';
-    import { stocksData, stocksLoaded, stocksLoading, stocksError } from '$lib/stores/stocks';
+    import { usStocks, type USStockPrice, type USScrapeStatusResponse } from '$lib/api/client';
 
-    // Use store values
-    let priceData: StockPrice[] = [];
+    let priceData: USStockPrice[] = [];
     let loading = true;
     let error = '';
     let searchQuery = '';
     let viewMode: 'table' | 'grid' = 'table';
 
-    // Sorting - include new valuation columns
-    type SortKey = 'symbol' | 'ltp' | 'change' | 'change_pct' | 'volume' | 'high' | 'low' | 'sticker_price' | 'margin_of_safety' | 'discount_pct' | 'four_m_score';
-    let sortKey: SortKey = 'symbol';
-    let sortDirection: 'asc' | 'desc' = 'asc';
+    // Pagination
+    let offset = 0;
+    let limit = 100;
+    let totalCount = 0;
+    let hasMore = false;
 
-    // Filtering - include valuation filters
-    type FilterType = 'all' | 'gainers' | 'losers' | 'unchanged' | 'undervalued' | 'overvalued';
+    // Sorting
+    type SortKey = 'symbol' | 'current_price' | 'change' | 'change_pct' | 'market_cap' | 'sticker_price' | 'margin_of_safety' | 'discount_pct' | 'four_m_score';
+    let sortKey: SortKey = 'market_cap';
+    let sortDirection: 'asc' | 'desc' = 'desc';
+
+    // Filtering
+    type FilterType = 'all' | 'sp500' | 'gainers' | 'losers' | 'undervalued' | 'overvalued';
     let activeFilter: FilterType = 'all';
+    let selectedSector: string | null = null;
+    let sectors: string[] = [];
 
-    // Valuation refresh state
-    let refreshingValuations = false;
-    let refreshProgress: RefreshStatusResponse | null = null;
-    let refreshError = '';
-    let lastValuationRefresh: string | null = null;
-
-    // Subscribe to stores
-    stocksData.subscribe(v => priceData = v);
-    stocksLoading.subscribe(v => loading = v);
-    stocksError.subscribe(v => error = v);
+    // Scrape state
+    let scraping = false;
+    let scrapeProgress: USScrapeStatusResponse | null = null;
+    let scrapeError = '';
 
     // Filter -> Search -> Sort pipeline
     $: filteredByType = priceData.filter(stock => {
         if (activeFilter === 'all') return true;
+        if (activeFilter === 'sp500') return stock.is_sp500;
         if (activeFilter === 'gainers') return (stock.change ?? 0) > 0;
         if (activeFilter === 'losers') return (stock.change ?? 0) < 0;
-        if (activeFilter === 'unchanged') return (stock.change ?? 0) === 0;
-        // Valuation filters - only include stocks with calculable valuations
         if (activeFilter === 'undervalued') return stock.valuation_status === 'CALCULABLE' && (stock.discount_pct ?? 0) < 0;
         if (activeFilter === 'overvalued') return stock.valuation_status === 'CALCULABLE' && (stock.discount_pct ?? 0) > 0;
         return true;
     });
 
     $: searchedStocks = filteredByType.filter(stock =>
-        stock.symbol?.toLowerCase().includes(searchQuery.toLowerCase())
+        stock.symbol?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        stock.name?.toLowerCase().includes(searchQuery.toLowerCase())
     );
 
     $: sortedStocks = [...searchedStocks].sort((a, b) => {
         let aVal: any = a[sortKey];
         let bVal: any = b[sortKey];
 
-        // Handle nulls/undefined
         if (aVal === null || aVal === undefined) aVal = sortDirection === 'asc' ? Infinity : -Infinity;
         if (bVal === null || bVal === undefined) bVal = sortDirection === 'asc' ? Infinity : -Infinity;
 
-        // String comparison for symbol
         if (sortKey === 'symbol') {
             return sortDirection === 'asc'
                 ? String(aVal).localeCompare(String(bVal))
                 : String(bVal).localeCompare(String(aVal));
         }
 
-        // Numeric comparison for others
         return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
     });
 
-    // Stats computed from filtered (not searched) data
+    // Stats
     $: totalStocks = priceData.length;
+    $: sp500Count = priceData.filter(s => s.is_sp500).length;
     $: gainersCount = priceData.filter(s => (s.change ?? 0) > 0).length;
     $: losersCount = priceData.filter(s => (s.change ?? 0) < 0).length;
-    $: unchangedCount = priceData.filter(s => (s.change ?? 0) === 0).length;
-    // Valuation stats
     $: undervaluedCount = priceData.filter(s => s.valuation_status === 'CALCULABLE' && (s.discount_pct ?? 0) < 0).length;
     $: overvaluedCount = priceData.filter(s => s.valuation_status === 'CALCULABLE' && (s.discount_pct ?? 0) > 0).length;
     $: valuedCount = priceData.filter(s => s.valuation_status === 'CALCULABLE').length;
 
     onMount(async () => {
-        // Only fetch if not already loaded
-        let isLoaded = false;
-        stocksLoaded.subscribe(v => isLoaded = v)();
-
-        if (!isLoaded) {
-            await loadPrices();
-        }
-
-        // Check if valuations need auto-refresh (older than 7 days)
-        await checkValuationFreshness();
+        await loadPrices();
+        await loadSectors();
+        await checkScrapeStatus();
     });
 
-    async function checkValuationFreshness() {
-        const result = await calculator.getBatchValuations();
-        if (result.error || !result.data) return;
+    async function loadPrices() {
+        loading = true;
+        error = '';
 
-        const lastRefresh = result.data.last_refresh;
-        if (!lastRefresh) {
-            // No valuations cached yet - auto-refresh
-            console.log('No valuations cached, triggering auto-refresh...');
-            await refreshValuations();
-            return;
+        const options: any = { limit, offset };
+        if (activeFilter === 'sp500') options.sp500Only = true;
+        if (selectedSector) options.sector = selectedSector;
+
+        const result = await usStocks.getPrices(options);
+
+        if (result.error) {
+            error = result.error;
+        } else if (result.data) {
+            priceData = result.data;
+            hasMore = result.data.length === limit;
         }
 
-        // Check if older than 7 days
-        const lastDate = new Date(lastRefresh);
-        const now = new Date();
-        const daysSinceRefresh = (now.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24);
+        // Get total count
+        const countResult = await usStocks.getCount();
+        if (countResult.data) {
+            totalCount = countResult.data.total;
+        }
 
-        if (daysSinceRefresh > 7) {
-            console.log(`Valuations are ${daysSinceRefresh.toFixed(1)} days old, triggering auto-refresh...`);
-            await refreshValuations();
-        } else {
-            lastValuationRefresh = lastRefresh;
+        loading = false;
+    }
+
+    async function loadSectors() {
+        const result = await usStocks.getSectors();
+        if (result.data) {
+            sectors = result.data.sectors;
         }
     }
 
-    async function loadPrices() {
-        stocksLoading.set(true);
-        stocksError.set('');
-
-        const result = await stocks.getPrices();
-
-        if (result.error) {
-            stocksError.set(result.error);
-        } else if (result.data) {
-            stocksData.set(result.data);
-            stocksLoaded.set(true);
+    async function checkScrapeStatus() {
+        const result = await usStocks.getScrapeStatus();
+        if (result.data) {
+            scrapeProgress = result.data;
+            if (result.data.running) {
+                scraping = true;
+                pollScrapeStatus();
+            }
         }
-
-        stocksLoading.set(false);
     }
 
     function handleSort(key: SortKey) {
@@ -134,7 +126,7 @@
             sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
         } else {
             sortKey = key;
-            sortDirection = key === 'symbol' ? 'asc' : 'desc'; // Default desc for numbers
+            sortDirection = key === 'symbol' ? 'asc' : 'desc';
         }
     }
 
@@ -145,20 +137,22 @@
     function clearFilters() {
         activeFilter = 'all';
         searchQuery = '';
-        sortKey = 'symbol';
-        sortDirection = 'asc';
+        selectedSector = null;
+        sortKey = 'market_cap';
+        sortDirection = 'desc';
     }
 
     function formatPrice(value: number | undefined | null): string {
         if (value === undefined || value === null) return '-';
-        return `৳${value.toFixed(2)}`;
+        return `$${value.toFixed(2)}`;
     }
 
-    function formatVolume(value: number | undefined | null): string {
+    function formatMarketCap(value: number | undefined | null): string {
         if (value === undefined || value === null) return '-';
-        if (value >= 1000000) return `${(value / 1000000).toFixed(2)}M`;
-        if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
-        return value.toString();
+        if (value >= 1_000_000_000_000) return `$${(value / 1_000_000_000_000).toFixed(1)}T`;
+        if (value >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(1)}B`;
+        if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+        return `$${value.toLocaleString()}`;
     }
 
     function getChangeClass(value: number | undefined | null): string {
@@ -171,7 +165,6 @@
         return value >= 0 ? '↑' : '↓';
     }
 
-    // Valuation formatting functions
     function formatDiscount(value: number | undefined | null): string {
         if (value === undefined || value === null) return '-';
         const sign = value < 0 ? '' : '+';
@@ -180,7 +173,7 @@
 
     function getDiscountClass(value: number | undefined | null): string {
         if (value === undefined || value === null) return '';
-        return value < 0 ? 'positive' : 'negative';  // Undervalued is good (positive)
+        return value < 0 ? 'positive' : 'negative';
     }
 
     function getDiscountIcon(value: number | undefined | null): string {
@@ -200,84 +193,81 @@
         return '';
     }
 
-    function getSectorAbbrev(sector: string | undefined | null): string {
-        if (!sector) return '';
-        const abbrevMap: Record<string, string> = {
-            'Pharmaceuticals': 'Pharma',
-            'Banking': 'Bank',
-            'NBFI': 'NBFI',
-            'Cement': 'Cement',
-            'FMCG': 'FMCG',
-            'Textiles & RMG': 'Textile',
-            'Power & Energy': 'Power',
-            'Telecom': 'Telco',
-            'IT & Technology': 'IT',
-            'Ceramics': 'Ceramic',
-            'Steel': 'Steel',
-            'Food & Allied': 'Food',
-            'Insurance': 'Insur',
-            'Engineering': 'Engg',
-            'Miscellaneous': 'Misc',
-        };
-        return abbrevMap[sector] || sector.slice(0, 5);
-    }
-
-    function getValuationTooltip(stock: StockPrice): string {
+    function getValuationTooltip(stock: USStockPrice): string {
         if (stock.valuation_status === 'CALCULABLE') return '';
-        return stock.valuation_note || (stock.valuation_status === 'NOT_CALCULABLE' ? 'Not calculable' : 'No financial data available');
+        return stock.valuation_note || (stock.valuation_status === 'NOT_CALCULABLE' ? 'Not calculable' : 'Pending data fetch');
     }
 
-    // Refresh valuations
-    async function refreshValuations() {
-        refreshingValuations = true;
-        refreshError = '';
-        refreshProgress = null;
+    // Seed and Scrape
+    async function seedStocks() {
+        scraping = true;
+        scrapeError = '';
 
-        const result = await calculator.refreshValuations();
-
-        if (result.error) {
-            refreshError = result.error;
-            refreshingValuations = false;
+        const seedResult = await usStocks.seed(false);
+        if (seedResult.error) {
+            scrapeError = seedResult.error;
+            scraping = false;
             return;
         }
 
-        // Start polling for progress
-        pollRefreshStatus();
+        // Start scraping after seed
+        await triggerScrape();
     }
 
-    async function pollRefreshStatus() {
-        const result = await calculator.getRefreshStatus();
+    async function triggerScrape() {
+        scraping = true;
+        scrapeError = '';
+
+        const result = await usStocks.triggerScrape({ sp500Only: true });
 
         if (result.error) {
-            refreshError = result.error;
-            refreshingValuations = false;
+            scrapeError = result.error;
+            scraping = false;
             return;
         }
 
-        refreshProgress = result.data || null;
+        pollScrapeStatus();
+    }
+
+    async function pollScrapeStatus() {
+        const result = await usStocks.getScrapeStatus();
+
+        if (result.error) {
+            scrapeError = result.error;
+            scraping = false;
+            return;
+        }
+
+        scrapeProgress = result.data || null;
 
         if (result.data?.running) {
-            // Continue polling
-            setTimeout(pollRefreshStatus, 1000);
+            setTimeout(pollScrapeStatus, 2000);
         } else {
-            // Refresh complete - reload prices to get updated valuations
-            refreshingValuations = false;
-            lastValuationRefresh = result.data?.completed_at || null;
+            scraping = false;
             await loadPrices();
+        }
+    }
+
+    async function loadMore() {
+        offset += limit;
+        const result = await usStocks.getPrices({ limit, offset });
+        if (result.data) {
+            priceData = [...priceData, ...result.data];
+            hasMore = result.data.length === limit;
         }
     }
 </script>
 
 <svelte:head>
-    <title>Stocks - Stokr</title>
+    <title>US Stocks - Stokr</title>
 </svelte:head>
 
 <div class="stocks-page">
     <!-- Page Header -->
     <div class="page-header">
         <div class="header-content">
-            <h1>Stocks</h1>
-            <p class="header-subtitle">Live prices from Dhaka Stock Exchange</p>
+            <h1>US Stocks</h1>
+            <p class="header-subtitle">US market with Phil Town valuations</p>
         </div>
         <div class="header-actions">
             <div class="search-wrapper">
@@ -287,7 +277,7 @@
                 </svg>
                 <input
                     type="text"
-                    placeholder="Search stocks..."
+                    placeholder="Search US stocks..."
                     bind:value={searchQuery}
                     class="search-input"
                 />
@@ -297,29 +287,46 @@
                     <polyline points="23 4 23 10 17 10"/>
                     <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
                 </svg>
-                Refresh Prices
+                Refresh
             </button>
-            <button
-                class="btn btn-primary"
-                on:click={refreshValuations}
-                disabled={refreshingValuations}
-            >
-                {#if refreshingValuations}
-                    <svg class="spinner-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="32"/>
-                    </svg>
-                    {#if refreshProgress}
-                        {refreshProgress.current}/{refreshProgress.total}
+            {#if totalCount === 0}
+                <button
+                    class="btn btn-primary"
+                    on:click={seedStocks}
+                    disabled={scraping}
+                >
+                    {#if scraping}
+                        <svg class="spinner-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="32"/>
+                        </svg>
+                        Setting up...
                     {:else}
-                        Starting...
+                        Seed US Stocks
                     {/if}
-                {:else}
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
-                    </svg>
-                    Refresh Valuations
-                {/if}
-            </button>
+                </button>
+            {:else}
+                <button
+                    class="btn btn-primary"
+                    on:click={() => triggerScrape()}
+                    disabled={scraping}
+                >
+                    {#if scraping}
+                        <svg class="spinner-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="32"/>
+                        </svg>
+                        {#if scrapeProgress}
+                            {scrapeProgress.current}/{scrapeProgress.total}
+                        {:else}
+                            Starting...
+                        {/if}
+                    {:else}
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/>
+                        </svg>
+                        Fetch S&P 500
+                    {/if}
+                </button>
+            {/if}
         </div>
     </div>
 
@@ -335,9 +342,21 @@
                 <line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
             <div>
-                <p><strong>Error loading stocks</strong></p>
-                <p class="text-muted">Make sure the backend server is running</p>
+                <p><strong>Error loading US stocks</strong></p>
+                <p class="text-muted">{error}</p>
             </div>
+        </div>
+    {:else if totalCount === 0}
+        <div class="empty-state animate-fadeIn">
+            <svg class="empty-state-icon" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+                <line x1="9" y1="9" x2="9.01" y2="9"/>
+                <line x1="15" y1="9" x2="15.01" y2="9"/>
+            </svg>
+            <h2>No US Stocks Yet</h2>
+            <p>Click "Seed US Stocks" to fetch all US stock symbols from Finnhub.</p>
+            <p class="text-muted">This will populate 18,000+ stocks and mark S&P 500 components.</p>
         </div>
     {:else}
         <!-- Filter Tabs -->
@@ -349,6 +368,13 @@
                     on:click={() => setFilter('all')}
                 >
                     All <span class="filter-count">{totalStocks}</span>
+                </button>
+                <button
+                    class="filter-tab sp500"
+                    class:active={activeFilter === 'sp500'}
+                    on:click={() => setFilter('sp500')}
+                >
+                    S&P 500 <span class="filter-count">{sp500Count}</span>
                 </button>
                 <button
                     class="filter-tab gainers"
@@ -363,13 +389,6 @@
                     on:click={() => setFilter('losers')}
                 >
                     Losers <span class="filter-count negative">{losersCount}</span>
-                </button>
-                <button
-                    class="filter-tab"
-                    class:active={activeFilter === 'unchanged'}
-                    on:click={() => setFilter('unchanged')}
-                >
-                    Unchanged <span class="filter-count">{unchangedCount}</span>
                 </button>
                 <span class="filter-divider"></span>
                 <button
@@ -388,7 +407,20 @@
                 </button>
             </div>
 
-            {#if activeFilter !== 'all' || searchQuery}
+            {#if sectors.length > 0}
+                <select
+                    bind:value={selectedSector}
+                    on:change={loadPrices}
+                    class="sector-select"
+                >
+                    <option value={null}>All Sectors</option>
+                    {#each sectors as sector}
+                        <option value={sector}>{sector}</option>
+                    {/each}
+                </select>
+            {/if}
+
+            {#if activeFilter !== 'all' || searchQuery || selectedSector}
                 <button class="clear-filters-btn" on:click={clearFilters}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"/>
@@ -430,8 +462,8 @@
 
         <!-- Results count -->
         <div class="results-info mt-2">
-            <span class="results-count">Showing {sortedStocks.length} of {totalStocks} stocks</span>
-            {#if sortKey !== 'symbol' || sortDirection !== 'asc'}
+            <span class="results-count">Showing {sortedStocks.length} of {totalCount.toLocaleString()} stocks</span>
+            {#if sortKey !== 'market_cap' || sortDirection !== 'desc'}
                 <span class="sort-indicator">
                     Sorted by {sortKey === 'change_pct' ? 'change %' : sortKey === 'discount_pct' ? 'discount' : sortKey === 'four_m_score' ? 'Phil score' : sortKey}
                     {sortDirection === 'asc' ? '↑' : '↓'}
@@ -440,9 +472,9 @@
             <span class="valuation-indicator">
                 {valuedCount} with valuations
             </span>
-            {#if refreshingValuations && refreshProgress}
+            {#if scraping && scrapeProgress}
                 <span class="refresh-indicator">
-                    Calculating: {refreshProgress.current_symbol} ({refreshProgress.progress_percent?.toFixed(0) || 0}%)
+                    Fetching: {scrapeProgress.current_symbol} ({scrapeProgress.progress_percent?.toFixed(0) || 0}%)
                 </span>
             {/if}
         </div>
@@ -454,7 +486,7 @@
                     <table>
                         <thead>
                             <tr>
-                                <th title="Stock trading code on DSE">
+                                <th title="Stock symbol">
                                     <button class="sort-header" on:click={() => handleSort('symbol')}>
                                         Symbol
                                         <span class="sort-icon" class:active={sortKey === 'symbol'}>
@@ -462,15 +494,15 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right" title="Last Traded Price - the most recent price at which the stock was bought or sold">
-                                    <button class="sort-header" on:click={() => handleSort('ltp')}>
-                                        LTP
-                                        <span class="sort-icon" class:active={sortKey === 'ltp'}>
-                                            {sortKey === 'ltp' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                <th class="text-right" title="Current stock price">
+                                    <button class="sort-header" on:click={() => handleSort('current_price')}>
+                                        Price
+                                        <span class="sort-icon" class:active={sortKey === 'current_price'}>
+                                            {sortKey === 'current_price' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right" title="Price change from yesterday's close. Green = price went up, Red = price went down">
+                                <th class="text-right" title="Price change from yesterday">
                                     <button class="sort-header" on:click={() => handleSort('change_pct')}>
                                         Change
                                         <span class="sort-icon" class:active={sortKey === 'change_pct'}>
@@ -478,31 +510,15 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right" title="Highest price the stock traded at today">
-                                    <button class="sort-header" on:click={() => handleSort('high')}>
-                                        High
-                                        <span class="sort-icon" class:active={sortKey === 'high'}>
-                                            {sortKey === 'high' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
+                                <th class="text-right" title="Market capitalization">
+                                    <button class="sort-header" on:click={() => handleSort('market_cap')}>
+                                        Mkt Cap
+                                        <span class="sort-icon" class:active={sortKey === 'market_cap'}>
+                                            {sortKey === 'market_cap' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right" title="Lowest price the stock traded at today">
-                                    <button class="sort-header" on:click={() => handleSort('low')}>
-                                        Low
-                                        <span class="sort-icon" class:active={sortKey === 'low'}>
-                                            {sortKey === 'low' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
-                                        </span>
-                                    </button>
-                                </th>
-                                <th class="text-right" title="Number of shares traded today. Higher volume = more trading activity">
-                                    <button class="sort-header" on:click={() => handleSort('volume')}>
-                                        Volume
-                                        <span class="sort-icon" class:active={sortKey === 'volume'}>
-                                            {sortKey === 'volume' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
-                                        </span>
-                                    </button>
-                                </th>
-                                <th class="text-right valuation-col" title="Intrinsic value based on projected earnings growth (Phil Town's Rule #1)">
+                                <th class="text-right valuation-col" title="Phil Town's intrinsic value">
                                     <button class="sort-header" on:click={() => handleSort('sticker_price')}>
                                         Sticker
                                         <span class="sort-icon" class:active={sortKey === 'sticker_price'}>
@@ -510,7 +526,7 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right valuation-col" title="Margin of Safety - 50% of Sticker Price, ideal buy price for safety buffer">
+                                <th class="text-right valuation-col" title="Margin of Safety (50% of Sticker)">
                                     <button class="sort-header" on:click={() => handleSort('margin_of_safety')}>
                                         MOS
                                         <span class="sort-icon" class:active={sortKey === 'margin_of_safety'}>
@@ -518,7 +534,7 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right valuation-col" title="Price vs Sticker: Negative = undervalued (good), Positive = overvalued (expensive)">
+                                <th class="text-right valuation-col" title="Price vs Sticker: Negative = undervalued">
                                     <button class="sort-header" on:click={() => handleSort('discount_pct')}>
                                         Discount
                                         <span class="sort-icon" class:active={sortKey === 'discount_pct'}>
@@ -526,7 +542,7 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th class="text-right valuation-col" title="4Ms Score (0-100): Meaning, Moat, Management, Margin of Safety. A/B = Strong, C = Average, D/F = Weak">
+                                <th class="text-right valuation-col" title="4Ms Score: Meaning, Moat, Management, MOS">
                                     <button class="sort-header" on:click={() => handleSort('four_m_score')}>
                                         Phil Score
                                         <span class="sort-icon" class:active={sortKey === 'four_m_score'}>
@@ -534,22 +550,25 @@
                                         </span>
                                     </button>
                                 </th>
-                                <th>Action</th>
+                                <th>Status</th>
                             </tr>
                         </thead>
                         <tbody>
                             {#each sortedStocks as stock, i}
-                                <tr class="animate-fadeIn" style="animation-delay: {30 + i * 20}ms">
+                                <tr class="animate-fadeIn" style="animation-delay: {30 + i * 10}ms">
                                     <td>
-                                        <a href="/stocks/{stock.symbol}" class="stock-cell">
+                                        <div class="stock-cell">
                                             <span class="stock-symbol">{stock.symbol}</span>
-                                            {#if stock.sector && stock.sector !== 'Unknown'}
-                                                <span class="sector-badge" title={stock.sector}>{getSectorAbbrev(stock.sector)}</span>
+                                            {#if stock.is_sp500}
+                                                <span class="sp500-badge" title="S&P 500">500</span>
                                             {/if}
-                                        </a>
+                                            {#if stock.name}
+                                                <span class="stock-name" title={stock.name}>{stock.name.length > 20 ? stock.name.slice(0, 20) + '...' : stock.name}</span>
+                                            {/if}
+                                        </div>
                                     </td>
                                     <td class="text-right tabular-nums font-semibold">
-                                        {formatPrice(stock.ltp)}
+                                        {formatPrice(stock.current_price)}
                                     </td>
                                     <td class="text-right {getChangeClass(stock.change)}">
                                         <div class="change-cell">
@@ -568,22 +587,19 @@
                                             {/if}
                                         </div>
                                     </td>
-                                    <td class="text-right tabular-nums text-muted">{formatPrice(stock.high)}</td>
-                                    <td class="text-right tabular-nums text-muted">{formatPrice(stock.low)}</td>
-                                    <td class="text-right tabular-nums">{formatVolume(stock.volume)}</td>
-                                    <!-- Valuation columns -->
+                                    <td class="text-right tabular-nums">{formatMarketCap(stock.market_cap)}</td>
                                     <td class="text-right tabular-nums valuation-col" title={getValuationTooltip(stock)}>
                                         {#if stock.valuation_status === 'CALCULABLE'}
                                             {formatPrice(stock.sticker_price)}
                                         {:else}
-                                            <span class="text-muted na-value">N/A</span>
+                                            <span class="text-muted na-value">-</span>
                                         {/if}
                                     </td>
                                     <td class="text-right tabular-nums valuation-col" title={getValuationTooltip(stock)}>
                                         {#if stock.valuation_status === 'CALCULABLE'}
                                             {formatPrice(stock.margin_of_safety)}
                                         {:else}
-                                            <span class="text-muted na-value">N/A</span>
+                                            <span class="text-muted na-value">-</span>
                                         {/if}
                                     </td>
                                     <td class="text-right valuation-col {getDiscountClass(stock.discount_pct)}" title={getValuationTooltip(stock)}>
@@ -593,25 +609,29 @@
                                                 <span class="tabular-nums">{formatDiscount(stock.discount_pct)}</span>
                                             </div>
                                         {:else}
-                                            <span class="text-muted na-value">N/A</span>
+                                            <span class="text-muted na-value">-</span>
                                         {/if}
                                     </td>
-                                    <td class="text-right valuation-col {getGradeClass(stock.four_m_grade)}" title={stock.big_five_warning ? 'Big Five failed - score penalized, recommendation capped' : getValuationTooltip(stock)}>
+                                    <td class="text-right valuation-col {getGradeClass(stock.four_m_grade)}" title={stock.big_five_warning ? 'Big Five failed - recommendation capped' : getValuationTooltip(stock)}>
                                         {#if stock.valuation_status === 'CALCULABLE' && stock.four_m_score !== null && stock.four_m_score !== undefined}
                                             <span class="phil-score-cell">
                                                 {#if stock.big_five_warning}
-                                                    <span class="big-five-warning" title="Big Five failed (<3/5) - growth metrics declining">⚠️</span>
+                                                    <span class="big-five-warning" title="Big Five failed">!</span>
                                                 {/if}
                                                 <span class="phil-score tabular-nums">{formatScore(stock.four_m_score, stock.four_m_grade)}</span>
                                             </span>
                                         {:else}
-                                            <span class="text-muted na-value">N/A</span>
+                                            <span class="text-muted na-value">-</span>
                                         {/if}
                                     </td>
                                     <td>
-                                        <a href="/calculator?symbol={stock.symbol}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">
-                                            Analyze
-                                        </a>
+                                        {#if stock.valuation_status === 'CALCULABLE'}
+                                            <span class="status-badge status-ready">{stock.recommendation || 'HOLD'}</span>
+                                        {:else if stock.valuation_status === 'NOT_CALCULABLE'}
+                                            <span class="status-badge status-error" title={stock.valuation_note}>N/A</span>
+                                        {:else}
+                                            <span class="status-badge status-pending">Pending</span>
+                                        {/if}
                                     </td>
                                 </tr>
                             {/each}
@@ -626,7 +646,15 @@
                             <path d="M21 21l-4.35-4.35"/>
                         </svg>
                         <h3>No stocks found</h3>
-                        <p>No stocks matching "{searchQuery}"</p>
+                        <p>No stocks matching your search criteria</p>
+                    </div>
+                {/if}
+
+                {#if hasMore}
+                    <div class="load-more">
+                        <button class="btn btn-secondary" on:click={loadMore}>
+                            Load More
+                        </button>
                     </div>
                 {/if}
             </div>
@@ -634,9 +662,14 @@
             <!-- Grid View -->
             <div class="stocks-grid mt-3 animate-fadeIn stagger-2">
                 {#each sortedStocks as stock, i}
-                    <a href="/stocks/{stock.symbol}" class="stock-card animate-fadeIn" style="animation-delay: {30 + i * 15}ms">
+                    <div class="stock-card animate-fadeIn" style="animation-delay: {30 + i * 10}ms">
                         <div class="stock-card-header">
-                            <span class="stock-card-symbol">{stock.symbol}</span>
+                            <div>
+                                <span class="stock-card-symbol">{stock.symbol}</span>
+                                {#if stock.is_sp500}
+                                    <span class="sp500-badge small">500</span>
+                                {/if}
+                            </div>
                             <span class="stock-card-change {getChangeClass(stock.change)}">
                                 {#if stock.change_pct !== undefined && stock.change_pct !== null}
                                     {getChangeIcon(stock.change)}
@@ -646,13 +679,19 @@
                                 {/if}
                             </span>
                         </div>
-                        <div class="stock-card-price">{formatPrice(stock.ltp)}</div>
+                        {#if stock.name}
+                            <div class="stock-card-name" title={stock.name}>
+                                {stock.name.length > 25 ? stock.name.slice(0, 25) + '...' : stock.name}
+                            </div>
+                        {/if}
+                        <div class="stock-card-price">{formatPrice(stock.current_price)}</div>
                         <div class="stock-card-meta">
-                            <span>Vol: {formatVolume(stock.volume)}</span>
-                            <span>H: {formatPrice(stock.high)}</span>
-                            <span>L: {formatPrice(stock.low)}</span>
+                            <span>Cap: {formatMarketCap(stock.market_cap)}</span>
+                            {#if stock.valuation_status === 'CALCULABLE'}
+                                <span class="{getDiscountClass(stock.discount_pct)}">{formatDiscount(stock.discount_pct)}</span>
+                            {/if}
                         </div>
-                    </a>
+                    </div>
                 {/each}
             </div>
 
@@ -663,7 +702,7 @@
                         <path d="M21 21l-4.35-4.35"/>
                     </svg>
                     <h3>No stocks found</h3>
-                    <p>No stocks matching "{searchQuery}"</p>
+                    <p>No stocks matching your search criteria</p>
                 </div>
             {/if}
         {/if}
@@ -676,7 +715,6 @@
         margin: 0 auto;
     }
 
-    /* Page Header */
     .page-header {
         display: flex;
         justify-content: space-between;
@@ -721,7 +759,6 @@
         padding-left: 2.5rem;
     }
 
-    /* Filter Bar */
     .filter-bar {
         display: flex;
         align-items: center;
@@ -787,6 +824,22 @@
         color: var(--danger);
     }
 
+    .filter-divider {
+        width: 1px;
+        height: 20px;
+        background: var(--border);
+        margin: 0 0.5rem;
+    }
+
+    .sector-select {
+        padding: 0.5rem 1rem;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        font-size: 0.8125rem;
+        color: var(--text-primary);
+    }
+
     .clear-filters-btn {
         display: flex;
         align-items: center;
@@ -816,12 +869,12 @@
         margin-left: auto;
     }
 
-    /* Results Info */
     .results-info {
         display: flex;
         align-items: center;
         gap: 1rem;
         padding: 0.5rem 0;
+        flex-wrap: wrap;
     }
 
     .results-count {
@@ -835,7 +888,37 @@
         font-weight: 500;
     }
 
-    /* Sortable Headers */
+    .valuation-indicator {
+        font-size: 0.75rem;
+        color: var(--accent-primary);
+        padding: 0.25rem 0.5rem;
+        background: rgba(99, 102, 241, 0.1);
+        border-radius: var(--radius-sm);
+    }
+
+    .refresh-indicator {
+        font-size: 0.75rem;
+        color: var(--warning);
+        padding: 0.25rem 0.5rem;
+        background: rgba(245, 158, 11, 0.1);
+        border-radius: var(--radius-sm);
+        animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.6; }
+    }
+
+    .spinner-icon {
+        animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+
     .sort-header {
         display: inline-flex;
         align-items: center;
@@ -856,16 +939,11 @@
     .sort-icon {
         font-size: 0.75rem;
         opacity: 0.3;
-        transition: opacity var(--duration-fast) var(--ease-out-expo);
     }
 
     .sort-icon.active {
         opacity: 1;
         color: var(--accent-primary);
-    }
-
-    .sort-header:hover .sort-icon {
-        opacity: 0.7;
     }
 
     .view-toggle {
@@ -899,7 +977,6 @@
         box-shadow: var(--shadow-sm);
     }
 
-    /* Stocks Card */
     .stocks-card {
         padding: 0;
     }
@@ -925,31 +1002,33 @@
     .stock-cell {
         display: flex;
         align-items: center;
-        text-decoration: none;
+        gap: 0.5rem;
+        flex-wrap: wrap;
     }
 
     .stock-symbol {
         font-weight: 600;
         color: var(--accent-primary);
-        transition: color var(--duration-fast) var(--ease-out-expo);
     }
 
-    .stock-cell:hover .stock-symbol {
-        color: var(--accent-hover);
+    .stock-name {
+        font-size: 0.75rem;
+        color: var(--text-muted);
     }
 
-    .sector-badge {
+    .sp500-badge {
         display: inline-block;
-        margin-left: 0.5rem;
         padding: 0.125rem 0.375rem;
         font-size: 0.625rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.02em;
-        color: var(--text-muted);
-        background: var(--bg-secondary);
+        font-weight: 700;
+        color: #f59e0b;
+        background: rgba(245, 158, 11, 0.15);
         border-radius: var(--radius-sm);
-        vertical-align: middle;
+    }
+
+    .sp500-badge.small {
+        font-size: 0.5rem;
+        padding: 0.0625rem 0.25rem;
     }
 
     .change-cell {
@@ -968,48 +1047,6 @@
         opacity: 0.8;
     }
 
-    /* Filter Divider */
-    .filter-divider {
-        width: 1px;
-        height: 20px;
-        background: var(--border);
-        margin: 0 0.5rem;
-    }
-
-    /* Valuation indicators in results info */
-    .valuation-indicator {
-        font-size: 0.75rem;
-        color: var(--accent-primary);
-        padding: 0.25rem 0.5rem;
-        background: rgba(99, 102, 241, 0.1);
-        border-radius: var(--radius-sm);
-    }
-
-    .refresh-indicator {
-        font-size: 0.75rem;
-        color: var(--warning);
-        padding: 0.25rem 0.5rem;
-        background: rgba(245, 158, 11, 0.1);
-        border-radius: var(--radius-sm);
-        animation: pulse 1.5s infinite;
-    }
-
-    @keyframes pulse {
-        0%, 100% { opacity: 1; }
-        50% { opacity: 0.6; }
-    }
-
-    /* Spinner animation */
-    .spinner-icon {
-        animation: spin 1s linear infinite;
-    }
-
-    @keyframes spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-    }
-
-    /* Valuation columns */
     .valuation-col {
         white-space: nowrap;
     }
@@ -1042,15 +1079,44 @@
     }
 
     .big-five-warning {
-        font-size: 0.875rem;
+        color: var(--warning);
+        font-weight: 700;
         cursor: help;
-        filter: grayscale(0.2);
     }
 
-    /* Grid View */
+    .status-badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        border-radius: var(--radius-sm);
+        text-transform: uppercase;
+    }
+
+    .status-ready {
+        background: rgba(5, 150, 105, 0.12);
+        color: var(--success);
+    }
+
+    .status-pending {
+        background: rgba(245, 158, 11, 0.12);
+        color: var(--warning);
+    }
+
+    .status-error {
+        background: rgba(220, 38, 38, 0.12);
+        color: var(--danger);
+    }
+
+    .load-more {
+        display: flex;
+        justify-content: center;
+        padding: 1.5rem;
+    }
+
     .stocks-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
         gap: 1rem;
     }
 
@@ -1061,7 +1127,6 @@
         background: var(--bg-card);
         border-radius: var(--radius-lg);
         border: 1px solid var(--border-light);
-        text-decoration: none;
         transition: all var(--duration-fast) var(--ease-out-expo);
     }
 
@@ -1075,13 +1140,19 @@
         display: flex;
         justify-content: space-between;
         align-items: center;
-        margin-bottom: 0.75rem;
+        margin-bottom: 0.5rem;
     }
 
     .stock-card-symbol {
         font-weight: 700;
         font-size: 0.9375rem;
         color: var(--text-primary);
+    }
+
+    .stock-card-name {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        margin-bottom: 0.5rem;
     }
 
     .stock-card-change {
@@ -1113,19 +1184,48 @@
         color: var(--text-muted);
     }
 
-    /* Error */
+    .empty-state {
+        text-align: center;
+        padding: 3rem 1.5rem;
+    }
+
+    .empty-state-icon {
+        color: var(--text-muted);
+        margin-bottom: 1rem;
+    }
+
+    .empty-state h2, .empty-state h3 {
+        color: var(--text-primary);
+        margin-bottom: 0.5rem;
+    }
+
+    .empty-state p {
+        color: var(--text-muted);
+        margin-bottom: 0.25rem;
+    }
+
     .error {
         display: flex;
         align-items: flex-start;
         gap: 1rem;
+        padding: 1.5rem;
+        background: rgba(220, 38, 38, 0.1);
+        border-radius: var(--radius-lg);
     }
 
     .error svg {
         flex-shrink: 0;
-        margin-top: 2px;
+        color: var(--danger);
     }
 
-    /* Responsive */
+    .positive {
+        color: var(--success);
+    }
+
+    .negative {
+        color: var(--danger);
+    }
+
     @media (max-width: 768px) {
         .page-header {
             flex-direction: column;
@@ -1147,9 +1247,7 @@
 
         .filter-tabs {
             width: 100%;
-            justify-content: flex-start;
             overflow-x: auto;
-            padding-bottom: 0.5rem;
         }
 
         .filter-tab {
@@ -1157,29 +1255,6 @@
             font-size: 0.75rem;
         }
 
-        .filter-actions {
-            width: 100%;
-            justify-content: flex-end;
-            margin-left: 0;
-        }
-
-        .results-info {
-            flex-wrap: wrap;
-            gap: 0.5rem;
-        }
-
-        /* Hide high/low and valuation cols on tablet */
-        th:nth-child(4),
-        td:nth-child(4),
-        th:nth-child(5),
-        td:nth-child(5),
-        /* Hide MOS column (9th) on tablet */
-        th:nth-child(9),
-        td:nth-child(9) {
-            display: none;
-        }
-
-        /* Hide filter divider on mobile */
         .filter-divider {
             display: none;
         }
@@ -1187,36 +1262,16 @@
         .stocks-grid {
             grid-template-columns: 1fr 1fr;
         }
-    }
 
-    @media (max-width: 1024px) {
-        /* Hide MOS column on medium screens */
-        th:nth-child(9),
-        td:nth-child(9) {
+        th:nth-child(4),
+        td:nth-child(4),
+        th:nth-child(6),
+        td:nth-child(6) {
             display: none;
         }
     }
 
     @media (max-width: 480px) {
-        .filter-tab {
-            padding: 0.25rem 0.5rem;
-            font-size: 0.6875rem;
-        }
-
-        /* Hide more columns on small mobile */
-        th:nth-child(6),
-        td:nth-child(6),
-        th:nth-child(7),
-        td:nth-child(7),
-        th:nth-child(8),
-        td:nth-child(8),
-        th:nth-child(9),
-        td:nth-child(9),
-        th:nth-child(10),
-        td:nth-child(10) {
-            display: none;
-        }
-
         .filter-count {
             display: none;
         }
@@ -1225,9 +1280,12 @@
             grid-template-columns: 1fr;
         }
 
-        /* Hide volume on small mobile */
-        th:nth-child(6),
-        td:nth-child(6) {
+        th:nth-child(5),
+        td:nth-child(5),
+        th:nth-child(7),
+        td:nth-child(7),
+        th:nth-child(8),
+        td:nth-child(8) {
             display: none;
         }
     }

@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     # API settings
     api_prefix: str = ""
 
+    # Finnhub API (US Stocks)
+    finnhub_api_key: str = ""
+    us_stocks_enabled: bool = True
+    us_scrape_batch_size: int = 500
+    us_scrape_interval_hours: int = 6
+
     class Config:
         env_file = ".env"
         extra = "ignore"

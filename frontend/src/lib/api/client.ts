@@ -68,6 +68,44 @@ export const stocks = {
     }),
 };
 
+// US Stocks API
+export const usStocks = {
+    getPrices: (options?: USStocksPricesOptions) => {
+        const params = new URLSearchParams();
+        if (options?.limit) params.set('limit', options.limit.toString());
+        if (options?.offset) params.set('offset', options.offset.toString());
+        if (options?.sp500Only) params.set('sp500_only', 'true');
+        if (options?.sector) params.set('sector', options.sector);
+        if (options?.hasValuation) params.set('has_valuation', 'true');
+        const query = params.toString() ? `?${params.toString()}` : '';
+        return request<USStockPrice[]>(`/us-stocks/prices${query}`);
+    },
+    getCount: (sp500Only?: boolean, hasValuation?: boolean) => {
+        const params = new URLSearchParams();
+        if (sp500Only) params.set('sp500_only', 'true');
+        if (hasValuation) params.set('has_valuation', 'true');
+        const query = params.toString() ? `?${params.toString()}` : '';
+        return request<USStockCountResponse>(`/us-stocks/count${query}`);
+    },
+    getSectors: () => request<{sectors: string[]}>('/us-stocks/sectors'),
+    getPrice: (symbol: string) => request<USStockPrice>(`/us-stocks/${symbol}`),
+    getFundamentals: (symbol: string) => request<USFundamentalsResponse>(`/us-stocks/${symbol}/fundamentals`),
+    seed: (sp500Only?: boolean) => request<USSeedResponse>('/us-stocks/seed', {
+        method: 'POST',
+        body: JSON.stringify({ sp500_only: sp500Only || false }),
+    }),
+    triggerScrape: (options?: USTriggerScrapeOptions) => {
+        const params = new URLSearchParams();
+        if (options?.batchSize) params.set('batch_size', options.batchSize.toString());
+        if (options?.sp500Only) params.set('sp500_only', 'true');
+        if (options?.symbol) params.set('symbol', options.symbol);
+        const query = params.toString() ? `?${params.toString()}` : '';
+        return request<USTriggerScrapeResponse>(`/us-stocks/trigger-scrape${query}`, { method: 'POST' });
+    },
+    getScrapeStatus: () => request<USScrapeStatusResponse>('/us-stocks/scrape-status'),
+    stopScrape: () => request<{status: string, message: string}>('/us-stocks/stop-scrape', { method: 'POST' }),
+};
+
 // Calculator API
 export const calculator = {
     stickerPrice: (data: StickerPriceRequest) => request<StickerPriceResponse>('/calculate/sticker-price', {
@@ -328,4 +366,108 @@ export interface RefreshStatusResponse {
     started_at?: string;
     completed_at?: string;
     progress_percent?: number;
+}
+
+// US Stocks Types
+export interface USStockPrice {
+    symbol: string;
+    name?: string;
+    sector?: string;
+    market_cap?: number;
+    current_price?: number;
+    previous_close?: number;
+    change?: number;
+    change_pct?: number;
+    high_52w?: number;
+    low_52w?: number;
+    sticker_price?: number;
+    margin_of_safety?: number;
+    discount_pct?: number;
+    four_m_score?: number;
+    four_m_grade?: string;
+    big_five_score?: number;
+    big_five_warning?: boolean;
+    recommendation?: string;
+    valuation_status: 'CALCULABLE' | 'NOT_CALCULABLE' | 'UNKNOWN';
+    valuation_note?: string;
+    is_sp500: boolean;
+    last_fundamental_update?: string;
+}
+
+export interface USStocksPricesOptions {
+    limit?: number;
+    offset?: number;
+    sp500Only?: boolean;
+    sector?: string;
+    hasValuation?: boolean;
+}
+
+export interface USStockCountResponse {
+    total: number;
+    sp500_only: boolean;
+    has_valuation: boolean;
+}
+
+export interface USFundamentalsResponse {
+    symbol: string;
+    source: string;
+    data: USFinancialRecord[];
+}
+
+export interface USFinancialRecord {
+    year: number;
+    revenue?: number;
+    net_income?: number;
+    eps?: number;
+    total_equity?: number;
+    total_assets?: number;
+    total_debt?: number;
+    operating_cash_flow?: number;
+    capital_expenditure?: number;
+    free_cash_flow?: number;
+    roe?: number;
+    roa?: number;
+    debt_to_equity?: number;
+    gross_margin?: number;
+    operating_margin?: number;
+    net_margin?: number;
+}
+
+export interface USSeedResponse {
+    message: string;
+    total_fetched: number;
+    inserted: number;
+    updated: number;
+    sp500_count: number;
+}
+
+export interface USTriggerScrapeOptions {
+    batchSize?: number;
+    sp500Only?: boolean;
+    symbol?: string;
+}
+
+export interface USTriggerScrapeResponse {
+    status: 'started' | 'already_running';
+    message: string;
+    total_stocks?: number;
+    symbols_sample?: string[];
+    check_progress_at?: string;
+    progress?: {
+        current: number;
+        total: number;
+        current_symbol: string;
+    };
+}
+
+export interface USScrapeStatusResponse {
+    running: boolean;
+    current: number;
+    total: number;
+    current_symbol: string;
+    success_count: number;
+    failed_count: number;
+    progress_percent?: number;
+    started_at?: string;
+    completed: boolean;
 }
