@@ -104,9 +104,19 @@
             {#if analysis?.name}
                 <p class="header-subtitle">{analysis.name}</p>
             {/if}
-            {#if analysis?.sector}
-                <span class="sector-badge">{analysis.sector}</span>
-            {/if}
+            <div class="header-tags">
+                {#if analysis?.sector}
+                    <span class="sector-badge">{analysis.sector}</span>
+                {/if}
+                <a href="https://finance.yahoo.com/quote/{symbol}/" target="_blank" rel="noopener noreferrer" class="yahoo-link">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                        <polyline points="15 3 21 3 21 9"/>
+                        <line x1="10" y1="14" x2="21" y2="3"/>
+                    </svg>
+                    Yahoo Finance
+                </a>
+            </div>
         </div>
         {#if analysis?.recommendation}
             <div class="header-badge">
@@ -462,6 +472,13 @@
         margin: 0 0 0.5rem 0;
     }
 
+    .header-tags {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-top: 0.5rem;
+    }
+
     .sector-badge {
         display: inline-block;
         padding: 0.25rem 0.625rem;
@@ -470,6 +487,25 @@
         font-size: 0.75rem;
         font-weight: 600;
         color: var(--text-secondary);
+    }
+
+    .yahoo-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.25rem 0.625rem;
+        background: rgba(103, 58, 183, 0.1);
+        border-radius: var(--radius-sm);
+        font-size: 0.75rem;
+        font-weight: 600;
+        color: #7c3aed;
+        text-decoration: none;
+        transition: all var(--duration-fast) ease;
+    }
+
+    .yahoo-link:hover {
+        background: rgba(103, 58, 183, 0.2);
+        color: #6d28d9;
     }
 
     .header-badge {
