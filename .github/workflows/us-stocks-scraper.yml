@@ -29,7 +29,8 @@ jobs:
           echo "Triggering US stocks scrape..."
 
           # Use input values if manual trigger, otherwise defaults
-          SP500_ONLY="${{ github.event.inputs.sp500_only || 'true' }}"
+          # Scheduled runs use sp500_only=false to scrape all stocks by priority
+          SP500_ONLY="${{ github.event.inputs.sp500_only || 'false' }}"
           BATCH_SIZE="${{ github.event.inputs.batch_size || '500' }}"
 
           RESPONSE=$(curl -s -X POST \
