@@ -10,11 +10,11 @@ on:
       sp500_only:
         description: 'Scrape S&P 500 only'
         required: false
-        default: 'true'
+        default: 'false'
         type: choice
         options:
-          - 'true'
           - 'false'
+          - 'true'
       batch_size:
         description: 'Batch size (number of stocks)'
         required: false
