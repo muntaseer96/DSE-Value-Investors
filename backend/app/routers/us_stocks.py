@@ -648,7 +648,7 @@ def _calculate_us_valuations(db: Session, symbol: str):
 
         # Calculate Big Five
         big_five_calc = BigFiveCalculator()
-        big_five_result = big_five_calc.calculate(fin_data)
+        big_five_result = big_five_calc.calculate_from_financials(fin_data)
         stock.big_five_score = big_five_result.score
         stock.big_five_warning = not big_five_result.passes  # Warn if score < 3
 
