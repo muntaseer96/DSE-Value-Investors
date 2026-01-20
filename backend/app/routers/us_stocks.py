@@ -204,34 +204,34 @@ def get_us_filter_counts(db: Session = Depends(get_db)):
     result = db.execute(text("""
         SELECT
             COUNT(*) as total,
-            COUNT(*) FILTER (WHERE is_sp500 = TRUE) as sp500,
-            COUNT(*) FILTER (WHERE change > 0) as gainers,
-            COUNT(*) FILTER (WHERE change < 0) as losers,
-            COUNT(*) FILTER (WHERE
+            SUM(CASE WHEN is_sp500 = TRUE THEN 1 ELSE 0 END) as sp500,
+            SUM(CASE WHEN change > 0 THEN 1 ELSE 0 END) as gainers,
+            SUM(CASE WHEN change < 0 THEN 1 ELSE 0 END) as losers,
+            SUM(CASE WHEN
                 valuation_status = 'CALCULABLE'
                 AND sticker_price > 0
                 AND current_price IS NOT NULL
-                AND ((current_price - sticker_price) / sticker_price * 100) < 0
-            ) as undervalued,
-            COUNT(*) FILTER (WHERE
+                AND current_price < sticker_price
+            THEN 1 ELSE 0 END) as undervalued,
+            SUM(CASE WHEN
                 valuation_status = 'CALCULABLE'
                 AND sticker_price > 0
                 AND current_price IS NOT NULL
-                AND ((current_price - sticker_price) / sticker_price * 100) > 0
-            ) as overvalued,
-            COUNT(*) FILTER (WHERE valuation_status = 'CALCULABLE') as with_valuation
+                AND current_price > sticker_price
+            THEN 1 ELSE 0 END) as overvalued,
+            SUM(CASE WHEN valuation_status = 'CALCULABLE' THEN 1 ELSE 0 END) as with_valuation
         FROM us_stocks
     """))
     row = result.fetchone()
 
     return {
         "total": row[0] if row else 0,
-        "sp500": row[1] if row else 0,
-        "gainers": row[2] if row else 0,
-        "losers": row[3] if row else 0,
-        "undervalued": row[4] if row else 0,
-        "overvalued": row[5] if row else 0,
-        "with_valuation": row[6] if row else 0,
+        "sp500": int(row[1] or 0) if row else 0,
+        "gainers": int(row[2] or 0) if row else 0,
+        "losers": int(row[3] or 0) if row else 0,
+        "undervalued": int(row[4] or 0) if row else 0,
+        "overvalued": int(row[5] or 0) if row else 0,
+        "with_valuation": int(row[6] or 0) if row else 0,
     }
 
 
