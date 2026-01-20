@@ -77,6 +77,9 @@ export const usStocks = {
         if (options?.sp500Only) params.set('sp500_only', 'true');
         if (options?.sector) params.set('sector', options.sector);
         if (options?.hasValuation) params.set('has_valuation', 'true');
+        if (options?.filterType) params.set('filter_type', options.filterType);
+        if (options?.sortBy) params.set('sort_by', options.sortBy);
+        if (options?.sortOrder) params.set('sort_order', options.sortOrder);
         const query = params.toString() ? `?${params.toString()}` : '';
         return request<USStockPrice[]>(`/us-stocks/prices${query}`);
     },
@@ -401,6 +404,9 @@ export interface USStocksPricesOptions {
     sp500Only?: boolean;
     sector?: string;
     hasValuation?: boolean;
+    filterType?: 'gainers' | 'losers' | 'undervalued' | 'overvalued';
+    sortBy?: 'symbol' | 'current_price' | 'change' | 'change_pct' | 'market_cap' | 'sticker_price' | 'margin_of_safety' | 'discount_pct' | 'four_m_score';
+    sortOrder?: 'asc' | 'desc';
 }
 
 export interface USStockCountResponse {

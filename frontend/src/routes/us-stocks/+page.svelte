@@ -42,37 +42,12 @@
     let scrapeProgress: USScrapeStatusResponse | null = null;
     let scrapeError = '';
 
-    // Filter -> Search -> Sort pipeline
-    $: filteredByType = priceData.filter(stock => {
-        if (activeFilter === 'all') return true;
-        if (activeFilter === 'sp500') return stock.is_sp500;
-        if (activeFilter === 'gainers') return (stock.change ?? 0) > 0;
-        if (activeFilter === 'losers') return (stock.change ?? 0) < 0;
-        if (activeFilter === 'undervalued') return stock.valuation_status === 'CALCULABLE' && (stock.discount_pct ?? 0) < 0;
-        if (activeFilter === 'overvalued') return stock.valuation_status === 'CALCULABLE' && (stock.discount_pct ?? 0) > 0;
-        return true;
-    });
-
-    $: searchedStocks = filteredByType.filter(stock =>
+    // Search only (filtering and sorting now happen server-side)
+    $: displayedStocks = priceData.filter(stock =>
+        !searchQuery ||
         stock.symbol?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         stock.name?.toLowerCase().includes(searchQuery.toLowerCase())
     );
-
-    $: sortedStocks = [...searchedStocks].sort((a, b) => {
-        let aVal: any = a[sortKey];
-        let bVal: any = b[sortKey];
-
-        if (aVal === null || aVal === undefined) aVal = sortDirection === 'asc' ? Infinity : -Infinity;
-        if (bVal === null || bVal === undefined) bVal = sortDirection === 'asc' ? Infinity : -Infinity;
-
-        if (sortKey === 'symbol') {
-            return sortDirection === 'asc'
-                ? String(aVal).localeCompare(String(bVal))
-                : String(bVal).localeCompare(String(aVal));
-        }
-
-        return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
-    });
 
     // Stats from loaded data (for display purposes only)
     $: loadedStocksCount = priceData.length;
@@ -87,8 +62,12 @@
         loading = true;
         error = '';
 
-        const options: any = { limit, offset };
+        const options: any = { limit, offset, sortBy: sortKey, sortOrder: sortDirection };
         if (activeFilter === 'sp500') options.sp500Only = true;
+        if (activeFilter === 'gainers') options.filterType = 'gainers';
+        if (activeFilter === 'losers') options.filterType = 'losers';
+        if (activeFilter === 'undervalued') options.filterType = 'undervalued';
+        if (activeFilter === 'overvalued') options.filterType = 'overvalued';
         if (selectedSector) options.sector = selectedSector;
 
         const result = await usStocks.getPrices(options);
@@ -157,10 +136,16 @@
             sortKey = key;
             sortDirection = key === 'symbol' ? 'asc' : 'desc';
         }
+        // Reset offset and reload with new sort
+        offset = 0;
+        loadPrices();
     }
 
     function setFilter(filter: FilterType) {
         activeFilter = filter;
+        // Reset offset and reload with new filter
+        offset = 0;
+        loadPrices();
     }
 
     function clearFilters() {
@@ -169,6 +154,8 @@
         selectedSector = null;
         sortKey = 'market_cap';
         sortDirection = 'desc';
+        offset = 0;
+        loadPrices();
     }
 
     function formatPrice(value: number | undefined | null): string {
@@ -291,7 +278,15 @@
 
     async function loadMore() {
         offset += limit;
-        const result = await usStocks.getPrices({ limit, offset });
+        const options: any = { limit, offset, sortBy: sortKey, sortOrder: sortDirection };
+        if (activeFilter === 'sp500') options.sp500Only = true;
+        if (activeFilter === 'gainers') options.filterType = 'gainers';
+        if (activeFilter === 'losers') options.filterType = 'losers';
+        if (activeFilter === 'undervalued') options.filterType = 'undervalued';
+        if (activeFilter === 'overvalued') options.filterType = 'overvalued';
+        if (selectedSector) options.sector = selectedSector;
+
+        const result = await usStocks.getPrices(options);
         if (result.data) {
             priceData = [...priceData, ...result.data];
             hasMore = result.data.length === limit;
@@ -503,7 +498,7 @@
 
         <!-- Results count -->
         <div class="results-info mt-2">
-            <span class="results-count">Showing {sortedStocks.length} of {totalCount.toLocaleString()} stocks</span>
+            <span class="results-count">Showing {displayedStocks.length} of {totalCount.toLocaleString()} stocks</span>
             {#if sortKey !== 'market_cap' || sortDirection !== 'desc'}
                 <span class="sort-indicator">
                     Sorted by {sortKey === 'change_pct' ? 'change %' : sortKey === 'discount_pct' ? 'discount' : sortKey === 'four_m_score' ? 'Phil score' : sortKey}
@@ -595,7 +590,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {#each sortedStocks as stock, i}
+                            {#each displayedStocks as stock, i}
                                 <tr class="animate-fadeIn" style="animation-delay: {30 + i * 10}ms">
                                     <td>
                                         <div class="stock-cell">
@@ -680,7 +675,7 @@
                     </table>
                 </div>
 
-                {#if sortedStocks.length === 0}
+                {#if displayedStocks.length === 0}
                     <div class="empty-state">
                         <svg class="empty-state-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                             <circle cx="11" cy="11" r="8"/>
@@ -702,7 +697,7 @@
         {:else}
             <!-- Grid View -->
             <div class="stocks-grid mt-3 animate-fadeIn stagger-2">
-                {#each sortedStocks as stock, i}
+                {#each displayedStocks as stock, i}
                     <div class="stock-card animate-fadeIn" style="animation-delay: {30 + i * 10}ms">
                         <div class="stock-card-header">
                             <div>
@@ -736,7 +731,7 @@
                 {/each}
             </div>
 
-            {#if sortedStocks.length === 0}
+            {#if displayedStocks.length === 0}
                 <div class="empty-state mt-3">
                     <svg class="empty-state-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                         <circle cx="11" cy="11" r="8"/>

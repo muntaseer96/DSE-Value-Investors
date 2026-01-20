@@ -105,6 +105,9 @@ def get_all_us_prices(
     sp500_only: bool = Query(default=False),
     sector: Optional[str] = Query(default=None),
     has_valuation: bool = Query(default=False),
+    filter_type: Optional[str] = Query(default=None),
+    sort_by: str = Query(default="market_cap"),
+    sort_order: str = Query(default="desc"),
     db: Session = Depends(get_db)
 ):
     """Get all US stocks with cached prices and valuations.
@@ -115,6 +118,9 @@ def get_all_us_prices(
         sp500_only: If True, only return S&P 500 stocks
         sector: Filter by sector
         has_valuation: If True, only return stocks with calculated valuations
+        filter_type: Filter type (gainers, losers, undervalued, overvalued)
+        sort_by: Column to sort by (symbol, current_price, change, change_pct, market_cap, sticker_price, margin_of_safety, discount_pct, four_m_score)
+        sort_order: Sort order (asc or desc)
     """
     query = db.query(USStock)
 
@@ -127,8 +133,59 @@ def get_all_us_prices(
     if has_valuation:
         query = query.filter(USStock.valuation_status == "CALCULABLE")
 
-    # Order by market cap (largest first), then by symbol
-    query = query.order_by(USStock.market_cap.desc().nullslast(), USStock.symbol)
+    # Apply filter_type
+    if filter_type == "gainers":
+        query = query.filter(USStock.change > 0)
+    elif filter_type == "losers":
+        query = query.filter(USStock.change < 0)
+    elif filter_type == "undervalued":
+        query = query.filter(
+            USStock.valuation_status == "CALCULABLE",
+            USStock.sticker_price > 0,
+            USStock.current_price.isnot(None),
+            USStock.current_price < USStock.sticker_price
+        )
+    elif filter_type == "overvalued":
+        query = query.filter(
+            USStock.valuation_status == "CALCULABLE",
+            USStock.sticker_price > 0,
+            USStock.current_price.isnot(None),
+            USStock.current_price > USStock.sticker_price
+        )
+
+    # Map sort_by to actual column
+    sort_columns = {
+        "symbol": USStock.symbol,
+        "current_price": USStock.current_price,
+        "change": USStock.change,
+        "change_pct": USStock.change_pct,
+        "market_cap": USStock.market_cap,
+        "sticker_price": USStock.sticker_price,
+        "margin_of_safety": USStock.margin_of_safety,
+        "four_m_score": USStock.four_m_score,
+    }
+
+    # Special handling for discount_pct (calculated field)
+    if sort_by == "discount_pct":
+        # Sort by the ratio of current_price to sticker_price
+        # discount_pct = (current_price - sticker_price) / sticker_price * 100
+        # Lower ratio = more undervalued
+        from sqlalchemy import case, and_
+        discount_expr = case(
+            (and_(USStock.sticker_price > 0, USStock.current_price.isnot(None)),
+             (USStock.current_price - USStock.sticker_price) / USStock.sticker_price),
+            else_=None
+        )
+        if sort_order == "asc":
+            query = query.order_by(discount_expr.asc().nullslast(), USStock.symbol)
+        else:
+            query = query.order_by(discount_expr.desc().nullslast(), USStock.symbol)
+    else:
+        sort_column = sort_columns.get(sort_by, USStock.market_cap)
+        if sort_order == "asc":
+            query = query.order_by(sort_column.asc().nullslast(), USStock.symbol)
+        else:
+            query = query.order_by(sort_column.desc().nullslast(), USStock.symbol)
 
     stocks = query.offset(offset).limit(limit).all()
 
