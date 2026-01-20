@@ -106,6 +106,27 @@
             filterCounts = filterCountsResult.data;
             totalCount = filterCountsResult.data.total;
             totalValuationCount = filterCountsResult.data.with_valuation;
+        } else {
+            // Fallback to old count endpoint if filter-counts fails
+            const countResult = await usStocks.getCount();
+            if (countResult.data) {
+                totalCount = countResult.data.total;
+                // Use loaded data for filter counts as fallback
+                filterCounts = {
+                    total: countResult.data.total,
+                    sp500: priceData.filter(s => s.is_sp500).length,
+                    gainers: priceData.filter(s => (s.change ?? 0) > 0).length,
+                    losers: priceData.filter(s => (s.change ?? 0) < 0).length,
+                    undervalued: priceData.filter(s => s.valuation_status === 'CALCULABLE' && (s.discount_pct ?? 0) < 0).length,
+                    overvalued: priceData.filter(s => s.valuation_status === 'CALCULABLE' && (s.discount_pct ?? 0) > 0).length,
+                    with_valuation: priceData.filter(s => s.valuation_status === 'CALCULABLE').length,
+                };
+            }
+            // Get valuation count
+            const valCountResult = await usStocks.getCount(false, true);
+            if (valCountResult.data) {
+                totalValuationCount = valCountResult.data.total;
+            }
         }
 
         loading = false;

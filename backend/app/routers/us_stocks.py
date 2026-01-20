@@ -196,6 +196,10 @@ def get_us_filter_counts(db: Session = Depends(get_db)):
     """Get counts for all filter categories in one request.
 
     Returns counts for: total, sp500, gainers, losers, undervalued, overvalued, with_valuation
+
+    Note: discount is calculated as (current_price - sticker_price) / sticker_price * 100
+    - Positive discount = overvalued (price above sticker)
+    - Negative discount = undervalued (price below sticker)
     """
     result = db.execute(text("""
         SELECT
@@ -203,8 +207,18 @@ def get_us_filter_counts(db: Session = Depends(get_db)):
             COUNT(*) FILTER (WHERE is_sp500 = TRUE) as sp500,
             COUNT(*) FILTER (WHERE change > 0) as gainers,
             COUNT(*) FILTER (WHERE change < 0) as losers,
-            COUNT(*) FILTER (WHERE valuation_status = 'CALCULABLE' AND discount_pct < 0) as undervalued,
-            COUNT(*) FILTER (WHERE valuation_status = 'CALCULABLE' AND discount_pct > 0) as overvalued,
+            COUNT(*) FILTER (WHERE
+                valuation_status = 'CALCULABLE'
+                AND sticker_price > 0
+                AND current_price IS NOT NULL
+                AND ((current_price - sticker_price) / sticker_price * 100) < 0
+            ) as undervalued,
+            COUNT(*) FILTER (WHERE
+                valuation_status = 'CALCULABLE'
+                AND sticker_price > 0
+                AND current_price IS NOT NULL
+                AND ((current_price - sticker_price) / sticker_price * 100) > 0
+            ) as overvalued,
             COUNT(*) FILTER (WHERE valuation_status = 'CALCULABLE') as with_valuation
         FROM us_stocks
     """))
