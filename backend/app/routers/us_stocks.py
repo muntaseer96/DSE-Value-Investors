@@ -201,45 +201,6 @@ def get_us_sectors(db: Session = Depends(get_db)):
     return {"sectors": sectors}
 
 
-@router.get("/{symbol}", response_model=USStockPrice)
-def get_us_stock_price(symbol: str, db: Session = Depends(get_db)):
-    """Get details for a specific US stock."""
-    stock = db.query(USStock).filter(USStock.symbol == symbol.upper()).first()
-
-    if not stock:
-        raise HTTPException(status_code=404, detail=f"US stock {symbol} not found")
-
-    # Calculate live discount percentage
-    discount_pct = None
-    if stock.sticker_price and stock.current_price and stock.sticker_price > 0:
-        discount_pct = ((stock.current_price - stock.sticker_price) / stock.sticker_price) * 100
-
-    return USStockPrice(
-        symbol=stock.symbol,
-        name=stock.name,
-        sector=stock.sector,
-        market_cap=stock.market_cap,
-        current_price=stock.current_price,
-        previous_close=stock.previous_close,
-        change=stock.change,
-        change_pct=stock.change_pct,
-        high_52w=stock.high_52w,
-        low_52w=stock.low_52w,
-        sticker_price=stock.sticker_price,
-        margin_of_safety=stock.margin_of_safety,
-        discount_pct=round(discount_pct, 2) if discount_pct is not None else None,
-        four_m_score=stock.four_m_score,
-        four_m_grade=stock.four_m_grade,
-        big_five_score=stock.big_five_score,
-        big_five_warning=stock.big_five_warning or False,
-        recommendation=stock.recommendation,
-        valuation_status=stock.valuation_status or "UNKNOWN",
-        valuation_note=stock.valuation_note,
-        is_sp500=stock.is_sp500 or False,
-        last_fundamental_update=stock.last_fundamental_update,
-    )
-
-
 @router.get("/{symbol}/fundamentals")
 def get_us_stock_fundamentals(symbol: str, db: Session = Depends(get_db)):
     """Get fundamental data for a US stock."""
@@ -771,3 +732,46 @@ def _get_recommendation(discount_pct: Optional[float], big_five_warning: bool, g
         return "SELL"
     else:
         return "STRONG_SELL"
+
+
+# ============================================================================
+# Single Stock Route (MUST be at end to avoid matching /scrape-status etc)
+# ============================================================================
+
+@router.get("/{symbol}", response_model=USStockPrice)
+def get_us_stock_price(symbol: str, db: Session = Depends(get_db)):
+    """Get details for a specific US stock."""
+    stock = db.query(USStock).filter(USStock.symbol == symbol.upper()).first()
+
+    if not stock:
+        raise HTTPException(status_code=404, detail=f"US stock {symbol} not found")
+
+    # Calculate live discount percentage
+    discount_pct = None
+    if stock.sticker_price and stock.current_price and stock.sticker_price > 0:
+        discount_pct = ((stock.current_price - stock.sticker_price) / stock.sticker_price) * 100
+
+    return USStockPrice(
+        symbol=stock.symbol,
+        name=stock.name,
+        sector=stock.sector,
+        market_cap=stock.market_cap,
+        current_price=stock.current_price,
+        previous_close=stock.previous_close,
+        change=stock.change,
+        change_pct=stock.change_pct,
+        high_52w=stock.high_52w,
+        low_52w=stock.low_52w,
+        sticker_price=stock.sticker_price,
+        margin_of_safety=stock.margin_of_safety,
+        discount_pct=round(discount_pct, 2) if discount_pct is not None else None,
+        four_m_score=stock.four_m_score,
+        four_m_grade=stock.four_m_grade,
+        big_five_score=stock.big_five_score,
+        big_five_warning=stock.big_five_warning or False,
+        recommendation=stock.recommendation,
+        valuation_status=stock.valuation_status or "UNKNOWN",
+        valuation_note=stock.valuation_note,
+        is_sp500=stock.is_sp500 or False,
+        last_fundamental_update=stock.last_fundamental_update,
+    )
