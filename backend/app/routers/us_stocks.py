@@ -313,48 +313,48 @@ async def seed_us_stocks(
                 # Filter to S&P 500 only
                 symbols = [s for s in symbols if s.get("symbol") in SP500_SYMBOLS]
 
-            # Insert/update stocks
-            inserted = 0
-            updated = 0
+            # Get all existing symbols in ONE query for performance
+            existing_symbols = set(
+                row[0] for row in db.query(USStock.symbol).all()
+            )
+
+            # Prepare bulk insert list
+            new_stocks = []
+            skipped = 0
 
             for sym_data in symbols:
                 symbol = sym_data.get("symbol", "")
 
                 # Skip invalid symbols (contain special characters)
                 if not symbol or "." in symbol or "-" in symbol or len(symbol) > 10:
+                    skipped += 1
                     continue
 
-                existing = db.query(USStock).filter(USStock.symbol == symbol).first()
+                # Skip if already exists
+                if symbol in existing_symbols:
+                    continue
 
                 is_sp500 = symbol in SP500_SYMBOLS
 
-                if existing:
-                    # Update
-                    existing.name = sym_data.get("description", existing.name)
-                    existing.is_sp500 = is_sp500
-                    if is_sp500:
-                        existing.scrape_priority = 10  # Higher priority for S&P 500
-                    existing.updated_at = datetime.now()
-                    updated += 1
-                else:
-                    # Insert
-                    stock = USStock(
-                        symbol=symbol,
-                        name=sym_data.get("description"),
-                        is_sp500=is_sp500,
-                        scrape_priority=10 if is_sp500 else 100,
-                        valuation_status="UNKNOWN",
-                    )
-                    db.add(stock)
-                    inserted += 1
+                new_stocks.append(USStock(
+                    symbol=symbol,
+                    name=sym_data.get("description"),
+                    is_sp500=is_sp500,
+                    scrape_priority=10 if is_sp500 else 100,
+                    valuation_status="UNKNOWN",
+                ))
 
-            db.commit()
+            # Bulk insert all new stocks
+            if new_stocks:
+                db.bulk_save_objects(new_stocks)
+                db.commit()
 
             return {
                 "message": f"Seeded US stocks successfully",
                 "total_fetched": len(symbols),
-                "inserted": inserted,
-                "updated": updated,
+                "inserted": len(new_stocks),
+                "skipped": skipped,
+                "already_existed": len(existing_symbols),
                 "sp500_count": len(SP500_SYMBOLS),
             }
 
