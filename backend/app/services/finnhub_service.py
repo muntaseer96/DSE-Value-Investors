@@ -41,51 +41,51 @@ class RateLimiter:
         self.timestamps.append(time.time())
 
 
-# GAAP concept mappings for SEC filings
+# GAAP concept mappings for SEC filings (Finnhub uses underscores, not colons)
 GAAP_MAPPINGS = {
     # Revenue variants
-    "us-gaap:Revenues": "revenue",
-    "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax": "revenue",
-    "us-gaap:SalesRevenueNet": "revenue",
-    "us-gaap:RevenueFromContractWithCustomerIncludingAssessedTax": "revenue",
-    "us-gaap:TotalRevenuesAndOtherIncome": "revenue",
+    "us-gaap_Revenues": "revenue",
+    "us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax": "revenue",
+    "us-gaap_SalesRevenueNet": "revenue",
+    "us-gaap_RevenueFromContractWithCustomerIncludingAssessedTax": "revenue",
+    "us-gaap_TotalRevenuesAndOtherIncome": "revenue",
 
     # Net Income
-    "us-gaap:NetIncomeLoss": "net_income",
-    "us-gaap:ProfitLoss": "net_income",
-    "us-gaap:NetIncomeLossAttributableToParent": "net_income",
+    "us-gaap_NetIncomeLoss": "net_income",
+    "us-gaap_ProfitLoss": "net_income",
+    "us-gaap_NetIncomeLossAttributableToParent": "net_income",
 
     # EPS
-    "us-gaap:EarningsPerShareBasic": "eps",
-    "us-gaap:EarningsPerShareDiluted": "eps_diluted",
+    "us-gaap_EarningsPerShareBasic": "eps",
+    "us-gaap_EarningsPerShareDiluted": "eps_diluted",
 
     # Equity
-    "us-gaap:StockholdersEquity": "total_equity",
-    "us-gaap:StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest": "total_equity",
+    "us-gaap_StockholdersEquity": "total_equity",
+    "us-gaap_StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest": "total_equity",
 
     # Assets & Liabilities
-    "us-gaap:Assets": "total_assets",
-    "us-gaap:Liabilities": "total_liabilities",
-    "us-gaap:LiabilitiesAndStockholdersEquity": "total_assets_check",
+    "us-gaap_Assets": "total_assets",
+    "us-gaap_Liabilities": "total_liabilities",
+    "us-gaap_LiabilitiesAndStockholdersEquity": "total_assets_check",
 
     # Debt
-    "us-gaap:LongTermDebt": "total_debt",
-    "us-gaap:LongTermDebtNoncurrent": "total_debt",
-    "us-gaap:DebtInstrumentCarryingAmount": "total_debt",
+    "us-gaap_LongTermDebt": "total_debt",
+    "us-gaap_LongTermDebtNoncurrent": "total_debt",
+    "us-gaap_DebtInstrumentCarryingAmount": "total_debt",
 
     # Cash Flow
-    "us-gaap:NetCashProvidedByUsedInOperatingActivities": "operating_cash_flow",
-    "us-gaap:NetCashProvidedByUsedInOperatingActivitiesContinuingOperations": "operating_cash_flow",
+    "us-gaap_NetCashProvidedByUsedInOperatingActivities": "operating_cash_flow",
+    "us-gaap_NetCashProvidedByUsedInOperatingActivitiesContinuingOperations": "operating_cash_flow",
 
     # CapEx
-    "us-gaap:PaymentsToAcquirePropertyPlantAndEquipment": "capital_expenditure",
-    "us-gaap:PaymentsToAcquireProductiveAssets": "capital_expenditure",
+    "us-gaap_PaymentsToAcquirePropertyPlantAndEquipment": "capital_expenditure",
+    "us-gaap_PaymentsToAcquireProductiveAssets": "capital_expenditure",
 
     # Gross Profit
-    "us-gaap:GrossProfit": "gross_profit",
+    "us-gaap_GrossProfit": "gross_profit",
 
     # Operating Income
-    "us-gaap:OperatingIncomeLoss": "operating_income",
+    "us-gaap_OperatingIncomeLoss": "operating_income",
 }
 
 
