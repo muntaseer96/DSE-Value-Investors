@@ -529,6 +529,7 @@
                     <span class="stat-value">{scrapeStats.success_rate_pct}%</span>
                     <span class="stat-label">Success Rate</span>
                 </div>
+                <span class="stat-attempted">{scrapeStats.stocks_attempted.toLocaleString()} attempted</span>
             </div>
         {/if}
 
@@ -873,6 +874,13 @@
         width: 1px;
         height: 32px;
         background: var(--border);
+    }
+
+    .stat-attempted {
+        margin-left: auto;
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        opacity: 0.7;
     }
 
     .filter-bar {
