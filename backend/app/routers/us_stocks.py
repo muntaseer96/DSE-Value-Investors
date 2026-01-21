@@ -488,7 +488,7 @@ async def seed_us_stocks(
     sp500_only = request.sp500_only if request else False
 
     # Start background task
-    background_tasks.add_task(asyncio.create_task, _seed_stocks_background(sp500_only))
+    background_tasks.add_task(_seed_stocks_background, sp500_only)
 
     return {
         "status": "started",
