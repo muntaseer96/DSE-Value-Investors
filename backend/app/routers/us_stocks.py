@@ -384,13 +384,19 @@ async def seed_us_stocks(
             new_stocks = []
             skipped = 0
 
+            # Build a map of symbol -> type for updating existing stocks
+            symbol_type_map = {}
+
             for sym_data in symbols:
                 symbol = sym_data.get("symbol", "")
+                stock_type = sym_data.get("type", "")
 
                 # Skip invalid symbols (contain special characters)
                 if not symbol or "." in symbol or "-" in symbol or len(symbol) > 10:
                     skipped += 1
                     continue
+
+                symbol_type_map[symbol] = stock_type
 
                 # Skip if already exists
                 if symbol in existing_symbols:
@@ -401,6 +407,7 @@ async def seed_us_stocks(
                 new_stocks.append(USStock(
                     symbol=symbol,
                     name=sym_data.get("description"),
+                    stock_type=stock_type,
                     is_sp500=is_sp500,
                     scrape_priority=10 if is_sp500 else 100,
                     valuation_status="UNKNOWN",
@@ -411,12 +418,23 @@ async def seed_us_stocks(
                 db.bulk_save_objects(new_stocks)
                 db.commit()
 
+            # Update existing stocks that don't have stock_type set
+            updated_types = 0
+            stocks_without_type = db.query(USStock).filter(USStock.stock_type.is_(None)).all()
+            for stock in stocks_without_type:
+                if stock.symbol in symbol_type_map:
+                    stock.stock_type = symbol_type_map[stock.symbol]
+                    updated_types += 1
+            if updated_types > 0:
+                db.commit()
+
             return {
                 "message": f"Seeded US stocks successfully",
                 "total_fetched": len(symbols),
                 "inserted": len(new_stocks),
                 "skipped": skipped,
                 "already_existed": len(existing_symbols),
+                "updated_types": updated_types,
                 "sp500_count": len(SP500_SYMBOLS),
             }
 
@@ -430,6 +448,7 @@ async def trigger_us_scrape(
     background_tasks: BackgroundTasks,
     batch_size: int = Query(default=None),
     sp500_only: bool = Query(default=False),
+    common_stock_only: bool = Query(default=True, description="Only scrape Common Stock type (skip ETFs, ADRs, etc.)"),
     symbol: Optional[str] = Query(default=None),
     db: Session = Depends(get_db)
 ):
@@ -440,6 +459,7 @@ async def trigger_us_scrape(
     Args:
         batch_size: Number of stocks to scrape (default from settings)
         sp500_only: If True, only scrape S&P 500 stocks
+        common_stock_only: If True, only scrape Common Stock type (default True)
         symbol: If provided, only scrape this specific symbol
     """
     global _us_scrape_progress
@@ -473,6 +493,10 @@ async def trigger_us_scrape(
 
         if sp500_only:
             query = query.filter(USStock.is_sp500 == True)
+
+        # Filter to Common Stock only (skip ETFs, ADRs, etc. which don't have SEC filings)
+        if common_stock_only:
+            query = query.filter(USStock.stock_type == "Common Stock")
 
         # Priority queue: never scraped first, then oldest updates
         query = query.order_by(
@@ -536,6 +560,75 @@ def get_us_scrape_status():
         started_at=_us_scrape_progress["started_at"],
         completed=not _us_scrape_progress["running"] and _us_scrape_progress["results"] is not None,
     )
+
+
+@router.get("/stats")
+def get_us_stocks_stats(db: Session = Depends(get_db)):
+    """Get statistics about US stock scraping progress."""
+    from sqlalchemy import func, text
+
+    # Total stocks in database
+    total_stocks = db.query(func.count(USStock.id)).scalar()
+
+    # Stocks by type
+    type_counts = db.execute(text("""
+        SELECT stock_type, COUNT(*) as count
+        FROM us_stocks
+        WHERE stock_type IS NOT NULL
+        GROUP BY stock_type
+        ORDER BY count DESC
+    """)).fetchall()
+
+    # Stocks with financial data
+    stocks_with_data = db.execute(text("""
+        SELECT COUNT(DISTINCT stock_symbol) FROM us_financial_data
+    """)).scalar()
+
+    # Stocks attempted (has last_fundamental_update)
+    stocks_attempted = db.query(func.count(USStock.id)).filter(
+        USStock.last_fundamental_update.isnot(None)
+    ).scalar()
+
+    # Common Stock stats
+    common_stock_total = db.query(func.count(USStock.id)).filter(
+        USStock.stock_type == "Common Stock"
+    ).scalar()
+
+    common_stock_attempted = db.query(func.count(USStock.id)).filter(
+        USStock.stock_type == "Common Stock",
+        USStock.last_fundamental_update.isnot(None)
+    ).scalar()
+
+    common_stock_pending = common_stock_total - common_stock_attempted if common_stock_total else 0
+
+    # S&P 500 stats
+    sp500_total = db.query(func.count(USStock.id)).filter(USStock.is_sp500 == True).scalar()
+    sp500_with_data = db.execute(text("""
+        SELECT COUNT(DISTINCT f.stock_symbol)
+        FROM us_financial_data f
+        JOIN us_stocks s ON f.stock_symbol = s.symbol
+        WHERE s.is_sp500 = true
+    """)).scalar()
+
+    # Success rate
+    success_rate = round(stocks_with_data / stocks_attempted * 100, 1) if stocks_attempted > 0 else 0
+
+    return {
+        "total_stocks_in_db": total_stocks,
+        "stocks_with_financial_data": stocks_with_data,
+        "stocks_attempted": stocks_attempted,
+        "success_rate_pct": success_rate,
+        "common_stock": {
+            "total": common_stock_total,
+            "attempted": common_stock_attempted,
+            "pending": common_stock_pending,
+        },
+        "sp500": {
+            "total": sp500_total,
+            "with_data": sp500_with_data,
+        },
+        "by_type": [{"type": row[0], "count": row[1]} for row in type_counts],
+    }
 
 
 @router.post("/stop-scrape")

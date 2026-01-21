@@ -36,6 +36,7 @@ class USStock(Base):
     valuation_note = Column(String(500))  # Reason if not calculable
 
     # Scraping metadata
+    stock_type = Column(String(50))  # e.g., "Common Stock", "ETP", "ADR"
     is_sp500 = Column(Boolean, default=False)
     scrape_priority = Column(Integer, default=100)  # Lower = higher priority
     last_price_update = Column(DateTime)

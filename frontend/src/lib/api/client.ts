@@ -111,6 +111,7 @@ export const usStocks = {
     },
     getScrapeStatus: () => request<USScrapeStatusResponse>('/us-stocks/scrape-status'),
     stopScrape: () => request<{status: string, message: string}>('/us-stocks/stop-scrape', { method: 'POST' }),
+    getStats: () => request<USStatsResponse>('/us-stocks/stats'),
 };
 
 // Calculator API
@@ -490,6 +491,23 @@ export interface USScrapeStatusResponse {
     progress_percent?: number;
     started_at?: string;
     completed: boolean;
+}
+
+export interface USStatsResponse {
+    total_stocks_in_db: number;
+    stocks_with_financial_data: number;
+    stocks_attempted: number;
+    success_rate_pct: number;
+    common_stock: {
+        total: number;
+        attempted: number;
+        pending: number;
+    };
+    sp500: {
+        total: number;
+        with_data: number;
+    };
+    by_type: Array<{type: string; count: number}>;
 }
 
 export interface USFullAnalysisResponse {

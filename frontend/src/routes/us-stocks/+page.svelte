@@ -1,12 +1,15 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { usStocks, type USStockPrice, type USScrapeStatusResponse, type USFilterCountsResponse } from '$lib/api/client';
+    import { usStocks, type USStockPrice, type USScrapeStatusResponse, type USFilterCountsResponse, type USStatsResponse } from '$lib/api/client';
 
     let priceData: USStockPrice[] = [];
     let loading = true;
     let error = '';
     let searchQuery = '';
     let viewMode: 'table' | 'grid' = 'table';
+
+    // Scrape stats
+    let scrapeStats: USStatsResponse | null = null;
 
     // Pagination
     let offset = 0;
@@ -55,8 +58,16 @@
     onMount(async () => {
         await loadPrices();
         await loadSectors();
+        await loadStats();
         await checkScrapeStatus();
     });
+
+    async function loadStats() {
+        const result = await usStocks.getStats();
+        if (result.data) {
+            scrapeStats = result.data;
+        }
+    }
 
     async function loadPrices() {
         loading = true;
@@ -496,6 +507,31 @@
             </div>
         </div>
 
+        <!-- Scrape Stats Bar -->
+        {#if scrapeStats}
+            <div class="scrape-stats-bar animate-fadeIn">
+                <div class="stat-item">
+                    <span class="stat-value">{scrapeStats.stocks_with_financial_data.toLocaleString()}</span>
+                    <span class="stat-label">Stocks Scraped</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                    <span class="stat-value">{scrapeStats.sp500.with_data}/{scrapeStats.sp500.total}</span>
+                    <span class="stat-label">S&P 500</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                    <span class="stat-value">{scrapeStats.common_stock.pending.toLocaleString()}</span>
+                    <span class="stat-label">Pending</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                    <span class="stat-value">{scrapeStats.success_rate_pct}%</span>
+                    <span class="stat-label">Success Rate</span>
+                </div>
+            </div>
+        {/if}
+
         <!-- Results count -->
         <div class="results-info mt-2">
             <span class="results-count">Showing {displayedStocks.length} of {totalCount.toLocaleString()} stocks</span>
@@ -799,6 +835,44 @@
     .search-input {
         width: 280px;
         padding-left: 2.5rem;
+    }
+
+    .scrape-stats-bar {
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+        padding: 0.75rem 1.25rem;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+        border-radius: var(--radius-lg);
+        border: 1px solid rgba(99, 102, 241, 0.2);
+        margin-bottom: 1rem;
+    }
+
+    .stat-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.125rem;
+    }
+
+    .stat-value {
+        font-size: 1.125rem;
+        font-weight: 700;
+        color: var(--accent-primary);
+        font-variant-numeric: tabular-nums;
+    }
+
+    .stat-label {
+        font-size: 0.6875rem;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.025em;
+    }
+
+    .stat-divider {
+        width: 1px;
+        height: 32px;
+        background: var(--border);
     }
 
     .filter-bar {
