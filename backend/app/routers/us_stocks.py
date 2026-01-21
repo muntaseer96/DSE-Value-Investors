@@ -770,7 +770,7 @@ async def _run_us_scrape(symbols: List[str], api_key: str):
 
 def _save_us_stock_data(db: Session, symbol: str, data: Dict):
     """Save scraped Finnhub data to database."""
-    from app.config.stock_splits import adjust_eps_for_splits
+    from app.stock_data.stock_splits import adjust_eps_for_splits
 
     stock = db.query(USStock).filter(USStock.symbol == symbol).first()
 
