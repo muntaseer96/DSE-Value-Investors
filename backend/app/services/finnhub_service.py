@@ -9,6 +9,101 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+def get_stock_splits(symbol: str) -> List[Dict]:
+    """
+    Fetch stock split history from yfinance.
+
+    Args:
+        symbol: Stock symbol (e.g., "AAPL")
+
+    Returns:
+        List of splits with date and ratio
+    """
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        splits = ticker.splits
+
+        if splits is None or len(splits) == 0:
+            return []
+
+        result = []
+        for date, ratio in splits.items():
+            result.append({
+                "date": date.strftime("%Y-%m-%d"),
+                "year": date.year,
+                "ratio": float(ratio)
+            })
+        return result
+    except Exception as e:
+        logger.warning(f"Failed to fetch splits for {symbol}: {e}")
+        return []
+
+
+def calculate_split_adjustment_factor(splits: List[Dict], for_year: int) -> float:
+    """
+    Calculate cumulative split adjustment factor for a given year.
+
+    If a stock had a 7:1 split in 2014 and 4:1 in 2020:
+    - For data from 2013 (before both splits): factor = 7 * 4 = 28
+    - For data from 2015 (after first split, before second): factor = 4
+    - For data from 2021 (after both splits): factor = 1
+
+    The EPS should be divided by this factor to get split-adjusted values.
+
+    Args:
+        splits: List of splits from get_stock_splits()
+        for_year: The fiscal year of the data to adjust
+
+    Returns:
+        Cumulative split factor (1.0 if no adjustment needed)
+    """
+    factor = 1.0
+
+    for split in splits:
+        split_year = split.get("year", 0)
+        ratio = split.get("ratio", 1)
+
+        # If the data year is before the split year, we need to adjust
+        if for_year < split_year and ratio > 1:
+            factor *= ratio
+
+    return factor
+
+
+def apply_split_adjustment(financials_by_year: Dict[int, Dict], symbol: str) -> Dict[int, Dict]:
+    """
+    Apply split adjustment to EPS values in financial data.
+
+    Args:
+        financials_by_year: Financial data keyed by year
+        symbol: Stock symbol
+
+    Returns:
+        Financial data with split-adjusted EPS
+    """
+    splits = get_stock_splits(symbol)
+
+    if not splits:
+        return financials_by_year
+
+    for year, data in financials_by_year.items():
+        factor = calculate_split_adjustment_factor(splits, year)
+
+        if factor > 1:
+            # Adjust EPS
+            if "eps" in data and data["eps"] is not None:
+                original_eps = data["eps"]
+                data["eps"] = round(original_eps / factor, 4)
+                logger.debug(f"{symbol} {year}: EPS adjusted from {original_eps} to {data['eps']} (factor: {factor})")
+
+            # Adjust diluted EPS if present
+            if "eps_diluted" in data and data["eps_diluted"] is not None:
+                data["eps_diluted"] = round(data["eps_diluted"] / factor, 4)
+
+    return financials_by_year
+
+
 class RateLimiter:
     """Simple rate limiter for API calls."""
 
@@ -283,6 +378,9 @@ class FinnhubService:
                             financials_by_year[year][field_name] = float(value)
                         except (ValueError, TypeError):
                             pass
+
+        # Apply stock split adjustment to EPS values
+        financials_by_year = apply_split_adjustment(financials_by_year, symbol)
 
         return financials_by_year
 

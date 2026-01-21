@@ -857,6 +857,144 @@ def _get_recommendation(discount_pct: Optional[float], big_five_warning: bool, g
 
 
 # ============================================================================
+# Split Adjustment Fix Endpoint
+# ============================================================================
+
+@router.post("/fix-splits")
+def fix_stock_splits(
+    dry_run: bool = Query(default=True, description="If True, show what would be fixed without making changes"),
+    db: Session = Depends(get_db)
+):
+    """
+    Automatically fix EPS values for stock splits.
+
+    This endpoint:
+    1. Fetches all stocks with EPS data from the database
+    2. Checks yfinance for stock split history
+    3. Calculates adjustment factors for historical EPS
+    4. Updates the database (if dry_run=False)
+
+    Args:
+        dry_run: If True (default), only show what would be fixed. Set to False to apply changes.
+
+    Returns:
+        Summary of stocks that need/were fixed
+    """
+    try:
+        from app.services.split_adjustment import apply_split_adjustments
+
+        result = apply_split_adjustments(db, dry_run=dry_run)
+
+        return {
+            "status": "success",
+            "dry_run": dry_run,
+            "message": f"{'Would fix' if dry_run else 'Fixed'} {result['total_records_adjusted']} EPS records across {result['total_stocks_adjusted']} stocks",
+            "summary": {
+                "total_stocks_adjusted": result["total_stocks_adjusted"],
+                "total_records_adjusted": result["total_records_adjusted"],
+            },
+            "stocks": result["stocks"],
+            "note": "Run with dry_run=false to apply changes" if dry_run else "Changes applied successfully"
+        }
+
+    except ImportError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"yfinance not installed. Run: pip install yfinance. Error: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Error fixing splits: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/fix-splits/{symbol}")
+def fix_single_stock_splits(
+    symbol: str,
+    dry_run: bool = Query(default=True),
+    db: Session = Depends(get_db)
+):
+    """Fix EPS values for a single stock's splits."""
+    from sqlalchemy import text
+
+    try:
+        from app.services.split_adjustment import get_stock_splits, calculate_split_factor
+
+        symbol = symbol.upper()
+        splits = get_stock_splits(symbol)
+
+        if not splits:
+            return {
+                "symbol": symbol,
+                "status": "no_splits",
+                "message": f"No stock splits found for {symbol}"
+            }
+
+        # Get EPS data
+        result = db.execute(text("""
+            SELECT id, year, eps
+            FROM us_financial_data
+            WHERE stock_symbol = :symbol AND eps IS NOT NULL
+            ORDER BY year
+        """), {"symbol": symbol})
+
+        eps_data = [{"id": row[0], "year": row[1], "eps": float(row[2])} for row in result.fetchall()]
+
+        if not eps_data:
+            return {
+                "symbol": symbol,
+                "status": "no_data",
+                "message": f"No EPS data found for {symbol}"
+            }
+
+        # Calculate adjustments
+        adjustments = []
+        for record in eps_data:
+            factor = calculate_split_factor(splits, record["year"])
+            if factor > 1:
+                adjustments.append({
+                    "id": record["id"],
+                    "year": record["year"],
+                    "old_eps": record["eps"],
+                    "new_eps": round(record["eps"] / factor, 4),
+                    "factor": factor
+                })
+
+        if not adjustments:
+            return {
+                "symbol": symbol,
+                "status": "no_adjustment_needed",
+                "message": f"All EPS data for {symbol} is already adjusted",
+                "splits": splits
+            }
+
+        # Apply if not dry run
+        if not dry_run:
+            for adj in adjustments:
+                db.execute(text("""
+                    UPDATE us_financial_data
+                    SET eps = :new_eps, updated_at = NOW()
+                    WHERE id = :id
+                """), {"new_eps": adj["new_eps"], "id": adj["id"]})
+            db.commit()
+
+        return {
+            "symbol": symbol,
+            "status": "success",
+            "dry_run": dry_run,
+            "splits": splits,
+            "adjustments_count": len(adjustments),
+            "adjustments": adjustments,
+            "message": f"{'Would fix' if dry_run else 'Fixed'} {len(adjustments)} EPS records"
+        }
+
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"yfinance not installed: {e}")
+    except Exception as e:
+        logger.error(f"Error fixing splits for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
 # Single Stock Route (MUST be at end to avoid matching /scrape-status etc)
 # ============================================================================
 
