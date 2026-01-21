@@ -118,6 +118,7 @@ def get_all_us_prices(
     filter_type: Optional[str] = Query(default=None),
     sort_by: str = Query(default="market_cap"),
     sort_order: str = Query(default="desc"),
+    search: Optional[str] = Query(default=None, description="Search by symbol or company name"),
     db: Session = Depends(get_db)
 ):
     """Get all US stocks with cached prices and valuations.
@@ -131,8 +132,17 @@ def get_all_us_prices(
         filter_type: Filter type (gainers, losers, undervalued, overvalued)
         sort_by: Column to sort by (symbol, current_price, change, change_pct, market_cap, sticker_price, margin_of_safety, discount_pct, four_m_score)
         sort_order: Sort order (asc or desc)
+        search: Search term for symbol or company name
     """
     query = db.query(USStock)
+
+    # Search filter (symbol or name)
+    if search:
+        search_term = f"%{search}%"
+        query = query.filter(
+            (USStock.symbol.ilike(search_term)) |
+            (USStock.name.ilike(search_term))
+        )
 
     if sp500_only:
         query = query.filter(USStock.is_sp500 == True)

@@ -80,6 +80,7 @@ export const usStocks = {
         if (options?.filterType) params.set('filter_type', options.filterType);
         if (options?.sortBy) params.set('sort_by', options.sortBy);
         if (options?.sortOrder) params.set('sort_order', options.sortOrder);
+        if (options?.search) params.set('search', options.search);
         const query = params.toString() ? `?${params.toString()}` : '';
         return request<USStockPrice[]>(`/us-stocks/prices${query}`);
     },
@@ -411,6 +412,7 @@ export interface USStocksPricesOptions {
     filterType?: 'gainers' | 'losers' | 'undervalued' | 'overvalued';
     sortBy?: 'symbol' | 'current_price' | 'change' | 'change_pct' | 'market_cap' | 'sticker_price' | 'margin_of_safety' | 'discount_pct' | 'four_m_score';
     sortOrder?: 'asc' | 'desc';
+    search?: string;
 }
 
 export interface USStockCountResponse {

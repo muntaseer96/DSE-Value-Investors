@@ -45,12 +45,27 @@
     let scrapeProgress: USScrapeStatusResponse | null = null;
     let scrapeError = '';
 
-    // Search only (filtering and sorting now happen server-side)
-    $: displayedStocks = priceData.filter(stock =>
-        !searchQuery ||
-        stock.symbol?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        stock.name?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    // Search debounce
+    let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+    let isSearching = false;
+
+    // All filtering/sorting/search now happens server-side
+    $: displayedStocks = priceData;
+
+    // Debounced search - triggers server-side search
+    function handleSearchInput(event: Event) {
+        const value = (event.target as HTMLInputElement).value;
+        searchQuery = value;
+
+        // Clear existing timeout
+        if (searchTimeout) clearTimeout(searchTimeout);
+
+        // Debounce: wait 300ms after user stops typing
+        searchTimeout = setTimeout(async () => {
+            offset = 0; // Reset to first page on new search
+            await loadPrices();
+        }, 300);
+    }
 
     // Stats from loaded data (for display purposes only)
     $: loadedStocksCount = priceData.length;
@@ -80,6 +95,7 @@
         if (activeFilter === 'undervalued') options.filterType = 'undervalued';
         if (activeFilter === 'overvalued') options.filterType = 'overvalued';
         if (selectedSector) options.sector = selectedSector;
+        if (searchQuery.trim()) options.search = searchQuery.trim();
 
         const result = await usStocks.getPrices(options);
 
@@ -325,7 +341,8 @@
                 <input
                     type="text"
                     placeholder="Search US stocks..."
-                    bind:value={searchQuery}
+                    value={searchQuery}
+                    on:input={handleSearchInput}
                     class="search-input"
                 />
             </div>
