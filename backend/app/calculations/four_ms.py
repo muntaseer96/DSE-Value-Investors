@@ -736,17 +736,20 @@ class FourMsEvaluator:
         # Final recommendation based on MOS and overall score
         # IMPORTANT: Cap at HOLD if Big Five fails (< 3/5 passing)
         if big_five_warning:
-            # Big Five failed - can't trust sticker price, cap at HOLD
-            if mos.recommendation == "SELL" or overall_score < 40:
-                recommendation = "AVOID"
+            # Big Five failed - can't trust sticker price or company quality
+            if overall_score < 40:
+                recommendation = "AVOID"  # Bad company with bad score
             else:
-                recommendation = "HOLD"
+                recommendation = "HOLD"  # Uncertain - Big Five failed but decent score
             summary.insert(0, f"⚠️ Big Five failed ({big_five_score}/5) - score penalty -{big_five_penalty}, recommendation capped")
-        elif mos.recommendation in ["STRONG_BUY", "BUY"] and overall_score >= 60:
-            recommendation = mos.recommendation
-        elif mos.recommendation == "SELL" or overall_score < 40:
+        elif overall_score < 40:
+            # Low overall score means company has issues
             recommendation = "AVOID"
+        elif mos.recommendation in ["STRONG_BUY", "BUY"] and overall_score >= 60:
+            # Good company at good price
+            recommendation = mos.recommendation
         else:
+            # Good company (passes Big Five, decent score) but overpriced or fair value
             recommendation = "HOLD"
 
         return FourMsResult(

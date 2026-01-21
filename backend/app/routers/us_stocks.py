@@ -961,12 +961,8 @@ def _calculate_us_valuations(db: Session, symbol: str):
             stock.four_m_score = four_ms_result.overall_score
             stock.four_m_grade = four_ms_result.overall_grade
 
-            # Determine recommendation
-            stock.recommendation = _get_recommendation(
-                stock.discount_to_sticker,
-                stock.big_five_warning,
-                stock.four_m_grade
-            )
+            # Use Four Ms recommendation (which considers Big Five, MOS, and overall score)
+            stock.recommendation = four_ms_result.recommendation
 
             stock.valuation_status = "CALCULABLE"
             stock.valuation_note = None
