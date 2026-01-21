@@ -770,6 +770,8 @@ async def _run_us_scrape(symbols: List[str], api_key: str):
 
 def _save_us_stock_data(db: Session, symbol: str, data: Dict):
     """Save scraped Finnhub data to database."""
+    from app.config.stock_splits import adjust_eps_for_splits
+
     stock = db.query(USStock).filter(USStock.symbol == symbol).first()
 
     if not stock:
@@ -824,7 +826,11 @@ def _save_us_stock_data(db: Session, symbol: str, data: Dict):
                          "operating_cash_flow", "capital_expenditure", "gross_profit",
                          "operating_income"]:
                 if field in fin_data:
-                    setattr(existing, field, fin_data[field])
+                    value = fin_data[field]
+                    # Apply stock split adjustment to EPS
+                    if field == "eps" and value is not None:
+                        value = adjust_eps_for_splits(symbol, year, value)
+                    setattr(existing, field, value)
 
             # Calculate derived metrics
             _calculate_financial_ratios(existing)
