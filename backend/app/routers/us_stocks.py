@@ -26,6 +26,16 @@ _us_scrape_progress: Dict[str, Any] = {
     "results": None,
 }
 
+# Global state for tracking seed progress
+_seed_progress: Dict[str, Any] = {
+    "running": False,
+    "fetched": 0,
+    "inserted": 0,
+    "updated_types": 0,
+    "started_at": None,
+    "completed_at": None,
+}
+
 router = APIRouter(prefix="/us-stocks", tags=["US Stocks"])
 
 
@@ -346,33 +356,29 @@ def get_us_stock_fundamentals(symbol: str, db: Session = Depends(get_db)):
 # Seed and Scrape Endpoints
 # ============================================================================
 
-@router.post("/seed")
-async def seed_us_stocks(
-    request: SeedRequest = None,
-    db: Session = Depends(get_db)
-):
-    """Seed US stock symbols from Finnhub API.
+async def _seed_stocks_background(sp500_only: bool = False):
+    """Background task to seed US stocks from Finnhub."""
+    global _seed_progress
+    from app.database import SessionLocal
 
-    This fetches all US stock symbols and populates the us_stocks table.
-    S&P 500 stocks are marked with is_sp500=True.
-    """
-    settings = get_settings()
+    _seed_progress["running"] = True
+    _seed_progress["started_at"] = datetime.now().isoformat()
+    _seed_progress["completed_at"] = None
+    _seed_progress["fetched"] = 0
+    _seed_progress["inserted"] = 0
+    _seed_progress["updated_types"] = 0
 
-    if not settings.finnhub_api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="FINNHUB_API_KEY not configured. Set it in environment variables."
-        )
-
+    db = SessionLocal()
     try:
+        settings = get_settings()
         from app.services.finnhub_service import FinnhubService, SP500_SYMBOLS
 
         async with FinnhubService(settings.finnhub_api_key) as service:
             # Fetch all US symbols
             symbols = await service.get_all_us_symbols()
+            _seed_progress["fetched"] = len(symbols)
 
-            if request and request.sp500_only:
-                # Filter to S&P 500 only
+            if sp500_only:
                 symbols = [s for s in symbols if s.get("symbol") in SP500_SYMBOLS]
 
             # Get all existing symbols in ONE query for performance
@@ -382,7 +388,6 @@ async def seed_us_stocks(
 
             # Prepare bulk insert list
             new_stocks = []
-            skipped = 0
 
             # Build a map of symbol -> type for updating existing stocks
             symbol_type_map = {}
@@ -393,7 +398,6 @@ async def seed_us_stocks(
 
                 # Skip invalid symbols (contain special characters)
                 if not symbol or "." in symbol or "-" in symbol or len(symbol) > 10:
-                    skipped += 1
                     continue
 
                 symbol_type_map[symbol] = stock_type
@@ -417,30 +421,86 @@ async def seed_us_stocks(
             if new_stocks:
                 db.bulk_save_objects(new_stocks)
                 db.commit()
+                _seed_progress["inserted"] = len(new_stocks)
 
-            # Update existing stocks that don't have stock_type set
+            # Update existing stocks that don't have stock_type set - use bulk update for speed
             updated_types = 0
-            stocks_without_type = db.query(USStock).filter(USStock.stock_type.is_(None)).all()
-            for stock in stocks_without_type:
-                if stock.symbol in symbol_type_map:
-                    stock.stock_type = symbol_type_map[stock.symbol]
-                    updated_types += 1
-            if updated_types > 0:
-                db.commit()
+            stocks_without_type = db.query(USStock.id, USStock.symbol).filter(USStock.stock_type.is_(None)).all()
 
-            return {
-                "message": f"Seeded US stocks successfully",
-                "total_fetched": len(symbols),
-                "inserted": len(new_stocks),
-                "skipped": skipped,
-                "already_existed": len(existing_symbols),
-                "updated_types": updated_types,
-                "sp500_count": len(SP500_SYMBOLS),
-            }
+            # Batch the updates for better performance
+            batch_size = 1000
+            update_batch = []
+            for stock_id, symbol in stocks_without_type:
+                if symbol in symbol_type_map:
+                    update_batch.append({"id": stock_id, "stock_type": symbol_type_map[symbol]})
+                    updated_types += 1
+
+                # Commit in batches
+                if len(update_batch) >= batch_size:
+                    db.bulk_update_mappings(USStock, update_batch)
+                    db.commit()
+                    _seed_progress["updated_types"] = updated_types
+                    update_batch = []
+
+            # Commit any remaining
+            if update_batch:
+                db.bulk_update_mappings(USStock, update_batch)
+                db.commit()
+                _seed_progress["updated_types"] = updated_types
+
+            logger.info(f"Seed complete: fetched={_seed_progress['fetched']}, inserted={_seed_progress['inserted']}, updated_types={updated_types}")
 
     except Exception as e:
-        logger.error(f"Error seeding US stocks: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in background seed: {e}")
+    finally:
+        db.close()
+        _seed_progress["running"] = False
+        _seed_progress["completed_at"] = datetime.now().isoformat()
+
+
+@router.post("/seed")
+async def seed_us_stocks(
+    background_tasks: BackgroundTasks,
+    request: SeedRequest = None,
+):
+    """Seed US stock symbols from Finnhub API.
+
+    This fetches all US stock symbols and populates the us_stocks table.
+    S&P 500 stocks are marked with is_sp500=True.
+    Runs in background to avoid timeout.
+    """
+    global _seed_progress
+
+    if _seed_progress["running"]:
+        return {
+            "status": "already_running",
+            "message": "Seed operation already in progress",
+            "progress": _seed_progress,
+        }
+
+    settings = get_settings()
+    if not settings.finnhub_api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="FINNHUB_API_KEY not configured. Set it in environment variables."
+        )
+
+    sp500_only = request.sp500_only if request else False
+
+    # Start background task
+    background_tasks.add_task(asyncio.create_task, _seed_stocks_background(sp500_only))
+
+    return {
+        "status": "started",
+        "message": "Seed operation started in background",
+        "check_progress_at": "/us-stocks/seed-status",
+    }
+
+
+@router.get("/seed-status")
+async def get_seed_status():
+    """Get the status of the seed operation."""
+    return _seed_progress
 
 
 @router.post("/trigger-scrape")
