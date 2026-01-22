@@ -2,21 +2,48 @@
 
 ## Quick Reference
 
-| Component | Technology | Deployment | URL/ID |
-|-----------|------------|------------|--------|
-| **Frontend** | SvelteKit + TypeScript | **Netlify** | `dsevalueinvestors.netlify.app` |
-| **Backend** | FastAPI + Python | **Railway** | Auto-deploys on push |
-| **Database** | PostgreSQL | **Supabase** | Project ID: `kjjringoshpczqttxaib` |
+| Component | Technology | Deployment | URL |
+|-----------|------------|------------|-----|
+| **Frontend** | SvelteKit + TypeScript | Netlify | `https://dsevalueinvestors.netlify.app` |
+| **Backend** | FastAPI + Python | Railway | `https://dse-value-investors-production.up.railway.app` |
+| **Database** | PostgreSQL | Supabase | Project ID: `kjjringoshpczqttxaib` |
+
+**Railway Project**: `https://railway.com/project/68351fb6-0dbd-42d5-9049-3d803e7bfc74`
+
+---
 
 ## Project Overview
 
-**Stokr** (rebranded from DSE Value Investor) is a stock analysis app for the **Dhaka Stock Exchange (DSE)** based on **Phil Town's Rule #1 Investing** methodology.
+**Stokr** is a stock analysis app based on **Phil Town's Rule #1 Investing** methodology. Supports both:
+- **Dhaka Stock Exchange (DSE)** - Bangladesh stocks
+- **US Stocks** - NYSE/NASDAQ with S&P 500 tracking
 
 **Features:**
-- Portfolio tracking with live P&L
-- Stock browser with search/filter/sort
+- Portfolio tracking with live P&L (DSE)
+- Stock browser with search/filter/sort (DSE + US)
 - Rule #1 Calculator (Sticker Price, Big Five, 4Ms)
-- Financial data scraping from LankaBD
+- Automated financial data scraping
+- Phil Score ranking system
+
+---
+
+## Data Sources
+
+### DSE Stocks
+| Data Type | Source | Notes |
+|-----------|--------|-------|
+| **Live Prices** | `bdshare` Python library | Returns LTP=0 when market closed (10am-2:30pm Sun-Thu Bangladesh time). Backend falls back to YCP (yesterday's close) when LTP=0 |
+| **Fundamentals** | LankaBD scraper (`lankabd_scraper.py`) | Playwright headless browser, scrapes Balance Sheet/Income Statement/Cash Flow |
+
+### US Stocks
+| Data Type | Source | Notes |
+|-----------|--------|-------|
+| **Quotes** | Finnhub API | Primary source. Falls back to `yfinance` if Finnhub returns no data |
+| **Fundamentals** | Finnhub API | SEC-reported financials (10-K filings) |
+| **Stock Splits** | `yfinance` | Auto-adjusts historical EPS for splits |
+
+**API Keys Required:**
+- `FINNHUB_API_KEY` - For US stock data (60 calls/min rate limit)
 
 ---
 
@@ -24,77 +51,90 @@
 
 ```
 Stock Investment/
-├── backend/                    # FastAPI Python backend
+├── backend/
 │   ├── app/
-│   │   ├── main.py            # App entry point
-│   │   ├── config.py          # Environment config
-│   │   ├── database.py        # SQLAlchemy setup
-│   │   ├── models/            # Stock, Portfolio, FinancialData
-│   │   ├── routers/           # API endpoints
-│   │   │   ├── stocks.py      # Stock data + scraping
-│   │   │   ├── portfolio.py   # Portfolio CRUD
-│   │   │   └── calculator.py  # Valuations
+│   │   ├── main.py                 # FastAPI app entry
+│   │   ├── config.py               # Settings & env vars
+│   │   ├── database.py             # SQLAlchemy setup
+│   │   ├── models/
+│   │   │   ├── stock.py            # DSE Stock model
+│   │   │   └── us_stock.py         # US Stock model
+│   │   ├── routers/
+│   │   │   ├── stocks.py           # DSE stock endpoints
+│   │   │   ├── us_stocks.py        # US stock endpoints
+│   │   │   ├── portfolio.py        # Portfolio CRUD
+│   │   │   └── calculator.py       # Valuation calculations
 │   │   ├── services/
-│   │   │   ├── dse_data.py    # External data fetching
-│   │   │   └── lankabd_scraper.py  # Playwright scraper
+│   │   │   ├── dse_data.py         # bdshare wrapper
+│   │   │   ├── lankabd_scraper.py  # DSE fundamentals scraper
+│   │   │   └── finnhub_service.py  # US stocks API + yfinance fallback
 │   │   └── calculations/
 │   │       ├── sticker_price.py
 │   │       ├── big_five.py
 │   │       └── four_ms.py
-│   ├── requirements.txt
-│   └── run.py
+│   ├── stock_data/                 # Stock split configs
+│   └── requirements.txt
 │
-├── frontend/                   # SvelteKit frontend
+├── frontend/
 │   ├── src/
 │   │   ├── lib/
-│   │   │   ├── api/client.ts  # API client + types
-│   │   │   └── stores/        # Svelte stores
+│   │   │   ├── api/client.ts       # API client & types
+│   │   │   └── stores/             # Svelte stores
 │   │   └── routes/
-│   │       ├── +page.svelte           # Portfolio
-│   │       ├── stocks/+page.svelte    # Stock browser
-│   │       ├── calculator/+page.svelte # Calculator
-│   │       └── admin/+page.svelte     # Data entry
+│   │       ├── +page.svelte              # Portfolio (DSE)
+│   │       ├── stocks/+page.svelte       # DSE stock browser
+│   │       ├── us-stocks/+page.svelte    # US stock browser
+│   │       ├── us-stocks/[symbol]/       # US stock analysis
+│   │       ├── calculator/+page.svelte   # Manual calculator
+│   │       └── admin/+page.svelte        # Data scraping admin
 │   └── package.json
 │
-└── CLAUDE.md                   # This file
+└── CLAUDE.md
 ```
 
 ---
 
-## Deployment
+## Database Tables (Supabase)
 
-### Frontend (Netlify)
-- **Auto-deploys** when `frontend/` files change
-- Build: `npm run build`
-- Publish: `frontend/build`
-- Env: `VITE_API_URL` = Railway backend URL
+### DSE Stocks
+- `stocks` - DSE stock prices & metadata
+- `financial_data` - DSE company financials by year
+- `portfolio_holdings` - User portfolio
+- `price_history` - Historical DSE prices
 
-### Backend (Railway)
-- **Auto-deploys** when `backend/` files change on push to main
-- Start: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- Env: `DATABASE_URL` = Supabase connection string
-
-### Database (Supabase)
-- **Project ID**: `kjjringoshpczqttxaib`
-- PostgreSQL with connection pooling (port 6543)
-- Tables: `stocks`, `financial_data`, `portfolio_holdings`, `price_history`
+### US Stocks
+- `us_stocks` - US stock prices, valuations, recommendations
+- `us_financial_data` - US company financials by year (from SEC filings)
 
 ---
 
 ## Key API Endpoints
 
+### DSE Stocks
 ```
-GET  /stocks/prices              # All DSE stock prices
-GET  /stocks/{symbol}            # Single stock price
-GET  /stocks/{symbol}/fundamentals  # Financial data
+GET  /stocks/prices                    # All DSE prices (uses YCP if LTP=0)
+GET  /stocks/{symbol}                  # Single stock price
+GET  /stocks/{symbol}/fundamentals     # Financial data
+GET  /calculate/analysis/{symbol}      # Full Rule #1 analysis
+```
 
-POST /calculate/sticker-price    # Manual calculation
-GET  /calculate/sticker-price/{symbol}  # Auto calculation
-GET  /calculate/big-five/{symbol}       # Big Five Numbers
-GET  /calculate/analysis/{symbol}       # Full Rule #1 analysis
+### US Stocks
+```
+GET  /us-stocks/prices                 # All US stocks with valuations
+GET  /us-stocks/{symbol}               # Single stock details
+GET  /us-stocks/{symbol}/fundamentals  # Financial history
+GET  /us-stocks/{symbol}/analysis      # Full Rule #1 analysis
+GET  /us-stocks/filter-counts          # Counts for filters
+POST /us-stocks/seed                   # Seed stock symbols from Finnhub
+POST /us-stocks/trigger-scrape         # Scrape fundamentals batch
+POST /us-stocks/trigger-scrape?symbol=AAPL  # Scrape single stock
+GET  /us-stocks/scrape-status          # Check scrape progress
+```
 
-GET  /portfolio/                 # All holdings with P&L
-POST /portfolio/                 # Add holding
+### Portfolio
+```
+GET  /portfolio/                       # All holdings with P&L
+POST /portfolio/                       # Add holding
 ```
 
 ---
@@ -105,110 +145,109 @@ POST /portfolio/                 # Add holding
 - Project EPS 10 years at capped growth (max 15%)
 - Apply PE ratio (Growth% × 2, capped by historical)
 - Discount back at 15% required return
-- Margin of Safety = Sticker × 50%
+- **Margin of Safety = Sticker × 50%**
 
 ### Big Five Numbers
 5 metrics need ≥10% CAGR (need 3/5 to pass):
 1. Revenue Growth
 2. EPS Growth
-3. Book Value Growth
+3. Book Value (Equity) Growth
 4. Operating Cash Flow Growth
 5. Free Cash Flow Growth
 
-**Special Statuses** (for problematic data):
-- `NEGATIVE` - 70%+ years negative (cash burning)
+**Special Statuses:**
+- `NEGATIVE` - 70%+ years negative
 - `INCONSISTENT` - 30-70% years negative
 - `NO_DATA` - Insufficient data
 
-### Four Ms
-1. **Meaning** - Do I understand the business?
+### Four Ms → Phil Score
+1. **Meaning** - Business understandability
 2. **Moat** - Competitive advantage (ROE, margins)
-3. **Management** - Owner-oriented (D/E, insider ownership)
+3. **Management** - Owner-oriented (D/E ratio)
 4. **Margin of Safety** - Price vs Sticker
 
----
-
-## LankaBD Scraper
-
-**Purpose**: Scrape financial statements (Balance Sheet, Income Statement, Cash Flow) from lankabd.com
-
-**Location**: `backend/app/services/lankabd_scraper.py`
-
-**Key Features**:
-- Playwright headless browser
-- 100+ field name variations mapped
-- Handles typos: "Acquision", "Aquisition"
-- Rate limited (2s delay)
-- Async batch processing
-
-**Usage**:
-```python
-async with LankaBDScraper() as scraper:
-    result = await scraper.scrape_stock('BXPHARMA')
-```
+**Grades:** A (80+), B (60-79), C (40-59), D (20-39), F (<20)
 
 ---
 
 ## Environment Variables
 
-### Backend (.env)
+### Backend (Railway)
 ```
-DATABASE_URL=postgresql://...  # Supabase connection
+DATABASE_URL=postgresql://...         # Supabase connection string
+FINNHUB_API_KEY=...                   # For US stock data
 FRONTEND_URL=https://dsevalueinvestors.netlify.app
 DEBUG=False
 ```
 
-### Frontend (.env)
+### Frontend (Netlify)
 ```
-VITE_API_URL=https://your-railway-app.railway.app
+VITE_API_URL=https://dse-value-investors-production.up.railway.app
 ```
 
 ---
 
-## Common Tasks
+## Deployment
 
-### Add new stock to scraper
-Edit `backend/rescrape_all_years.py` → `ALL_STOCKS` list
+### Auto-Deploy Flow
+1. Push to `main` branch
+2. Railway auto-deploys backend (~2-3 min)
+3. Netlify auto-deploys frontend (~1-2 min)
 
-### Update CapEx field mappings
-Edit `backend/app/services/lankabd_scraper.py` → `FIELD_MAPPINGS`
-
-### Run local development
+### Manual Commands
 ```bash
-# Backend
+# Local backend
 cd backend && python run.py
 
-# Frontend
+# Local frontend
 cd frontend && npm run dev
 ```
 
-### Execute SQL on Supabase
+### Supabase SQL
 Use MCP tool: `mcp__plugin_supabase_supabase__execute_sql`
 Project ID: `kjjringoshpczqttxaib`
 
 ---
 
-## User's Portfolio (Demo Data)
-- BXPHARMA: 779 shares @ ৳135.02
-- SQURPHARMA: 1215 shares @ ৳212.17
-- MARICO: 14 shares @ ৳2332.02
-- OLYMPIC: 397 shares @ ৳125.69
+## Common Issues & Fixes
 
----
+### DSE Prices Show 0
+- **Cause**: Market closed (10am-2:30pm Sun-Thu Bangladesh time)
+- **Fix**: Backend uses YCP (yesterday's close) as fallback
 
-## Recent Changes Log
+### US Stock Missing Price
+- **Cause**: Finnhub doesn't provide quotes for all stocks
+- **Fix**: yfinance fallback added (2026-01-22)
+- **Action**: Re-scrape the stock: `POST /us-stocks/trigger-scrape?symbol=XXX`
 
-### 2026-01-18
-- Added NEGATIVE/INCONSISTENT/NO_DATA statuses to Big Five calculator
-- Fixed frontend crash when cagr_pct is null
-- Added "Aquisition" typo variant to scraper
-- Updated BEACHHATCH with 2022 CapEx data
+### LankaBD Scraper Field Not Found
+- **Cause**: Website uses variant field names
+- **Fix**: Add mapping to `FIELD_MAPPINGS` in `lankabd_scraper.py`
 
 ---
 
 ## Notes
 
-- Financial institutions (banks, NBFIs) don't have CapEx - this is expected
-- Some companies have incomplete Cash Flow data on LankaBD
-- CAGR calculation filters out negative values (can't compound negatives)
-- Always push both backend AND frontend changes if they're related
+- Financial institutions (banks, NBFIs) don't have CapEx - expected
+- US stocks: Only "Common Stock" type scraped (skip ETFs, ADRs)
+- Stock splits auto-adjust historical EPS via `stock_data/stock_splits.py`
+- Finnhub rate limit: 60 calls/min (RateLimiter class handles this)
+- Always push backend + frontend together if changes are related
+
+---
+
+## Recent Changes
+
+### 2026-01-22
+- Fixed DSE prices to show YCP when LTP=0 (market closed)
+- Added yfinance fallback for US stock quotes when Finnhub fails
+- US stocks Analyze button now opens in new tab
+- Re-scraped 13 US stocks that were missing prices
+
+### 2026-01-20
+- Added server-side search for US stocks
+
+### 2026-01-18
+- Added NEGATIVE/INCONSISTENT/NO_DATA statuses to Big Five
+- Fixed frontend crash when cagr_pct is null
+- Added "Aquisition" typo variant to scraper
