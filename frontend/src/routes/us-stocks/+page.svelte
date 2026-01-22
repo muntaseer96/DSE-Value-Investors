@@ -703,7 +703,7 @@
                                         {/if}
                                     </td>
                                     <td>
-                                        <a href="/us-stocks/{stock.symbol}" class="btn btn-primary btn-sm">
+                                        <a href="/us-stocks/{stock.symbol}" target="_blank" rel="noopener" class="btn btn-primary btn-sm">
                                             Analyze
                                         </a>
                                     </td>

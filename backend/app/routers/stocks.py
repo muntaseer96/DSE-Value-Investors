@@ -114,7 +114,10 @@ def get_all_prices(limit: int = Query(default=500, le=500), db: Session = Depend
     prices = []
     for _, row in df.head(limit).iterrows():
         symbol = str(row.get('trading_code', row.get('symbol', '')))
-        ltp = _safe_float(row.get('ltp', row.get('close')))
+        # Use LTP if available and non-zero, otherwise fall back to YCP (yesterday's close)
+        ltp = _safe_float(row.get('ltp'))
+        if not ltp or ltp == 0:
+            ltp = _safe_float(row.get('ycp', row.get('close')))
 
         # Get sector from mapping
         sector = get_sector(symbol).value if symbol else None
@@ -165,9 +168,14 @@ def get_stock_price(symbol: str):
     if not price_data:
         raise HTTPException(status_code=404, detail=f"Stock {symbol} not found")
 
+    # Use LTP if available and non-zero, otherwise fall back to YCP
+    ltp = _safe_float(price_data.get('ltp'))
+    if not ltp or ltp == 0:
+        ltp = _safe_float(price_data.get('ycp', price_data.get('close')))
+
     return StockPrice(
         symbol=symbol.upper(),
-        ltp=_safe_float(price_data.get('ltp', price_data.get('close'))),
+        ltp=ltp,
         high=_safe_float(price_data.get('high')),
         low=_safe_float(price_data.get('low')),
         open=_safe_float(price_data.get('open')),

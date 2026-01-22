@@ -104,6 +104,50 @@ def apply_split_adjustment(financials_by_year: Dict[int, Dict], symbol: str) -> 
     return financials_by_year
 
 
+def _get_yfinance_quote(symbol: str) -> Optional[Dict]:
+    """
+    Fallback to get quote from yfinance when Finnhub doesn't have data.
+
+    Args:
+        symbol: Stock symbol
+
+    Returns:
+        Quote dict or None if failed
+    """
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+
+        if not info or "regularMarketPrice" not in info:
+            return None
+
+        current_price = info.get("regularMarketPrice")
+        previous_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
+
+        if not current_price:
+            return None
+
+        change = None
+        change_pct = None
+        if current_price and previous_close:
+            change = current_price - previous_close
+            change_pct = (change / previous_close) * 100 if previous_close else None
+
+        return {
+            "current_price": current_price,
+            "previous_close": previous_close,
+            "change": change,
+            "change_pct": change_pct,
+            "high": info.get("dayHigh"),
+            "low": info.get("dayLow"),
+            "open": info.get("open") or info.get("regularMarketOpen"),
+        }
+    except Exception as e:
+        logger.warning(f"yfinance fallback failed for {symbol}: {e}")
+        return None
+
+
 class RateLimiter:
     """Simple rate limiter for API calls."""
 
@@ -263,7 +307,7 @@ class FinnhubService:
             Quote data with current price, change, etc.
         """
         data = await self._request("quote", {"symbol": symbol})
-        return {
+        result = {
             "current_price": data.get("c"),  # Current price
             "previous_close": data.get("pc"),  # Previous close
             "change": data.get("d"),  # Change
@@ -273,6 +317,15 @@ class FinnhubService:
             "open": data.get("o"),  # Open price
             "timestamp": data.get("t"),  # Timestamp
         }
+
+        # If Finnhub returns 0 or None for price, try yfinance as fallback
+        if not result["current_price"]:
+            yf_quote = _get_yfinance_quote(symbol)
+            if yf_quote:
+                result.update(yf_quote)
+                logger.info(f"Used yfinance fallback for {symbol} quote")
+
+        return result
 
     async def get_company_profile(self, symbol: str) -> Dict:
         """
