@@ -75,12 +75,15 @@ def get_portfolio(db: Session = Depends(get_db)):
         price_data = data_service.get_stock_price(holding.stock_symbol)
         if price_data:
             # Try different field names for price
+            # Prioritize LTP, but fall back to YCP when market is closed (LTP=0)
             current_price = None
-            for key in ['ltp', 'close', 'last_trade_price', 'price', 'close_price']:
-                if key in price_data and price_data[key]:
+            for key in ['ltp', 'ycp', 'close', 'last_trade_price', 'price', 'close_price']:
+                if key in price_data:
                     try:
-                        current_price = float(price_data[key])
-                        break
+                        price_val = float(price_data[key])
+                        if price_val and price_val > 0:
+                            current_price = price_val
+                            break
                     except (ValueError, TypeError):
                         continue
 
