@@ -1,15 +1,12 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { usStocks, type USStockPrice, type USScrapeStatusResponse, type USFilterCountsResponse, type USStatsResponse } from '$lib/api/client';
+    import { usStocks, type USStockPrice, type USScrapeStatusResponse, type USFilterCountsResponse } from '$lib/api/client';
 
     let priceData: USStockPrice[] = [];
     let loading = true;
     let error = '';
     let searchQuery = '';
     let viewMode: 'table' | 'grid' = 'table';
-
-    // Scrape stats
-    let scrapeStats: USStatsResponse | null = null;
 
     // Pagination
     let offset = 0;
@@ -73,16 +70,8 @@
     onMount(async () => {
         await loadPrices();
         await loadSectors();
-        await loadStats();
         await checkScrapeStatus();
     });
-
-    async function loadStats() {
-        const result = await usStocks.getStats();
-        if (result.data) {
-            scrapeStats = result.data;
-        }
-    }
 
     async function loadPrices() {
         loading = true;
@@ -537,9 +526,6 @@
             <span class="valuation-indicator">
                 {totalValuationCount} with valuations
             </span>
-            {#if scrapeStats}
-                <span class="attempted-indicator">{scrapeStats.stocks_attempted.toLocaleString()} attempted</span>
-            {/if}
             {#if scraping && scrapeProgress}
                 <span class="refresh-indicator">
                     Fetching: {scrapeProgress.current_symbol} ({scrapeProgress.progress_percent?.toFixed(0) || 0}%)
@@ -831,12 +817,6 @@
     .search-input {
         width: 280px;
         padding-left: 2.5rem;
-    }
-
-    .attempted-indicator {
-        font-size: 0.75rem;
-        color: var(--text-muted);
-        opacity: 0.6;
     }
 
     .filter-bar {

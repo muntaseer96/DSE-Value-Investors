@@ -134,7 +134,8 @@ def get_all_us_prices(
         sort_order: Sort order (asc or desc)
         search: Search term for symbol or company name
     """
-    query = db.query(USStock)
+    # Only show Common Stock (exclude ETFs, REITs, ADRs, etc.)
+    query = db.query(USStock).filter(USStock.stock_type == "Common Stock")
 
     # Search filter (symbol or name)
     if search:
@@ -250,8 +251,9 @@ def get_us_stock_count(
     has_valuation: bool = Query(default=False),
     db: Session = Depends(get_db)
 ):
-    """Get total count of US stocks."""
-    query = db.query(USStock)
+    """Get total count of US stocks (Common Stock only)."""
+    # Only count Common Stock (exclude ETFs, REITs, ADRs, etc.)
+    query = db.query(USStock).filter(USStock.stock_type == "Common Stock")
 
     if sp500_only:
         query = query.filter(USStock.is_sp500 == True)
@@ -278,6 +280,7 @@ def get_us_filter_counts(db: Session = Depends(get_db)):
     - Positive discount = overvalued (price above sticker)
     - Negative discount = undervalued (price below sticker)
     """
+    # Only count Common Stock (exclude ETFs, REITs, ADRs, etc.)
     result = db.execute(text("""
         SELECT
             COUNT(*) as total,
@@ -298,6 +301,7 @@ def get_us_filter_counts(db: Session = Depends(get_db)):
             THEN 1 ELSE 0 END) as overvalued,
             SUM(CASE WHEN valuation_status = 'CALCULABLE' THEN 1 ELSE 0 END) as with_valuation
         FROM us_stocks
+        WHERE stock_type = 'Common Stock'
     """))
     row = result.fetchone()
 
@@ -314,9 +318,9 @@ def get_us_filter_counts(db: Session = Depends(get_db)):
 
 @router.get("/sectors")
 def get_us_sectors(db: Session = Depends(get_db)):
-    """Get list of unique sectors."""
+    """Get list of unique sectors (from Common Stock only)."""
     result = db.execute(
-        text("SELECT DISTINCT sector FROM us_stocks WHERE sector IS NOT NULL ORDER BY sector")
+        text("SELECT DISTINCT sector FROM us_stocks WHERE sector IS NOT NULL AND stock_type = 'Common Stock' ORDER BY sector")
     )
     sectors = [row[0] for row in result.fetchall()]
     return {"sectors": sectors}
