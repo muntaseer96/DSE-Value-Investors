@@ -39,7 +39,8 @@
 | Data Type | Source | Notes |
 |-----------|--------|-------|
 | **Quotes** | Finnhub API | Primary source. Falls back to `yfinance` if Finnhub returns no data |
-| **Fundamentals** | Finnhub API | SEC-reported financials (10-K filings) |
+| **Fundamentals** | Finnhub API | SEC-reported financials (10-K filings) for balance sheet, income, cash flow |
+| **EPS** | Finnhub `/stock/earnings` API | Actual reported quarterly EPS (summed to annual). More reliable than SEC-derived EPS |
 | **Stock Splits** | `yfinance` | Auto-detects and adjusts EPS for splits (2014+ only, older already in SEC data) |
 
 **API Keys Required:**
@@ -224,25 +225,17 @@ Project ID: `kjjringoshpczqttxaib`
 - **Cause**: Website uses variant field names
 - **Fix**: Add mapping to `FIELD_MAPPINGS` in `lankabd_scraper.py`
 
-### Finnhub EPS Data Quality Issues (e.g., Visa)
-- **Cause**: Some stocks (like V/Visa) have incorrect EPS in Finnhub's SEC data - often 6-8x too high due to wrong share count calculations
-- **Symptoms**: Absurdly low sticker price, negative EPS growth despite growing company
-- **Detection**: Compare DB EPS with yfinance: `python -c "import yfinance as yf; print(yf.Ticker('V').income_stmt.loc['Basic EPS'])"`
-- **Fix implemented**:
-  1. `FINNHUB_EPS_PROBLEM_SYMBOLS` set in `finnhub_service.py` - identifies affected stocks
-  2. `_get_yfinance_eps()` function - fetches correct EPS from yfinance
-  3. `HARDCODED_EPS_OVERRIDES` dict - fallback when yfinance fails (common on Railway due to Yahoo rate limiting)
-  4. Scraper skips split adjustment for problem stocks (yfinance data already adjusted)
-- **To add a new problem stock**:
-  1. Add symbol to `FINNHUB_EPS_PROBLEM_SYMBOLS`
-  2. Add correct EPS values to `HARDCODED_EPS_OVERRIDES` (get from yfinance locally)
-  3. Re-scrape: `POST /us-stocks/trigger-scrape?symbol=XXX`
-- **Currently affected**: V (Visa)
-
-### yfinance Fails on Railway
-- **Cause**: Yahoo Finance rate limits or blocks Railway's IP addresses
-- **Symptoms**: Logs show `'Ticker' object has no attribute 'income_stmt'` or `Expecting value: line 1 column 1`
-- **Fix**: Use `HARDCODED_EPS_OVERRIDES` as fallback - yfinance works locally but often fails in production
+### Finnhub EPS Data Quality (SOLVED)
+- **Problem**: Finnhub's SEC-derived EPS (`/stock/financials-reported`) was wrong for some stocks (V, ERIE, COKE) - often 6-8x too high due to wrong share count
+- **Solution**: Now use Finnhub's `/stock/earnings` API as PRIMARY source for EPS
+  - This endpoint returns actual reported quarterly EPS from earnings releases
+  - We sum 4 quarters to get annual EPS
+  - Much more reliable than deriving EPS from SEC 10-K filings
+- **Fallback chain** (if earnings API has no data):
+  1. Check if stock is in `FINNHUB_EPS_PROBLEM_SYMBOLS`
+  2. Try `_get_yfinance_eps()`
+  3. Use `HARDCODED_EPS_OVERRIDES` dict (last resort)
+- **Auto-fix**: All stocks will be corrected as scheduled scraper cycles through them (~2-3 weeks for full database)
 
 ---
 
@@ -257,6 +250,15 @@ Project ID: `kjjringoshpczqttxaib`
 ---
 
 ## Recent Changes
+
+### 2026-01-27 (Update 4)
+- **Automated EPS fix using Finnhub earnings API** - No more hardcoding needed!
+  - Added `_get_finnhub_earnings_eps()` function in `finnhub_service.py`
+  - Uses Finnhub `/stock/earnings` endpoint (actual reported quarterly EPS)
+  - Sums 4 quarters to get annual EPS - much more reliable than SEC-derived
+  - Now PRIMARY source for ALL stocks, not just problem ones
+  - Hardcoded values kept as last-resort fallback only
+  - All stocks will auto-fix as scheduled scraper cycles through (~2-3 weeks)
 
 ### 2026-01-27 (Update 3)
 - **Fixed Visa (V) EPS bug** - Finnhub returns ~8x inflated EPS for Visa due to wrong share count
