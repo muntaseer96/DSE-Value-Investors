@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 # Symbols with known Finnhub EPS data quality issues
 # These stocks will use yfinance EPS instead of Finnhub
 FINNHUB_EPS_PROBLEM_SYMBOLS = {
-    "V",  # Visa - Finnhub reports EPS with wrong share count (6-8x too high)
+    "V",     # Visa - Finnhub reports EPS with wrong share count (6-8x too high)
+    "ERIE",  # Erie Indemnity - Finnhub EPS ~151x too high (wrong share count)
+    "COKE",  # Coca-Cola Consolidated - Finnhub EPS ~20x too high (10:1 split in 2025)
 }
 
 # Hardcoded EPS values for problem stocks (fallback when yfinance fails on Railway)
@@ -35,6 +37,20 @@ HARDCODED_EPS_OVERRIDES = {
         2012: 0.89,  # Lower due to litigation charge
         2011: 1.53,
         2010: 1.29,
+    },
+    "ERIE": {
+        # Erie Indemnity - Finnhub uses wrong share count (~151x inflated)
+        2024: 12.89,
+        2023: 9.58,
+        2022: 6.41,
+        2021: 6.40,
+    },
+    "COKE": {
+        # Coca-Cola Consolidated - 10:1 split in May 2025, Finnhub shows pre-split EPS
+        2024: 7.01,
+        2023: 4.36,
+        2022: 4.59,
+        2021: 2.02,
     },
 }
 
