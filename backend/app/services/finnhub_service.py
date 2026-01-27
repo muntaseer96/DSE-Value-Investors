@@ -540,12 +540,15 @@ GAAP_MAPPINGS = {
     "us-gaap_LongTermDebt": "total_debt",
     "us-gaap_LongTermDebtNoncurrent": "total_debt",
     "us-gaap_DebtInstrumentCarryingAmount": "total_debt",
-    "us-gaap_ShortTermBorrowings": "short_term_debt",
+    "us-gaap_ShortTermBorrowings": "total_debt",  # Include short-term in total
     "us-gaap_LongTermDebtAndCapitalLeaseObligations": "total_debt",
     "us-gaap_DebtAndCapitalLeaseObligations": "total_debt",
     "us-gaap_LongTermDebtAndFinanceLeaseObligations": "total_debt",
     "us-gaap_FinanceLeaseLiabilityNoncurrent": "finance_lease_debt",
     "us-gaap_OperatingLeaseLiabilityNoncurrent": "operating_lease_debt",
+    "us-gaap_LoansPayable": "total_debt",  # Used by homebuilders like TPH
+    "us-gaap_NotesPayable": "total_debt",  # Common debt variant
+    "us-gaap_SeniorNotes": "total_debt",  # Corporate bonds
 
     # Cash Flow
     "us-gaap_NetCashProvidedByUsedInOperatingActivities": "operating_cash_flow",
