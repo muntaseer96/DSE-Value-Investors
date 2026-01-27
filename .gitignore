@@ -36,6 +36,9 @@ Thumbs.db
 *.log
 data/
 
+# SimFin bulk data (downloaded at runtime)
+backend/simfin_data/
+
 # Scraping temporary files
 *_results.json
 *_successful.json

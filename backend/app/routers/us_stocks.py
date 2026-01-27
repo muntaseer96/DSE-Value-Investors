@@ -1,4 +1,8 @@
-"""US Stock data API endpoints using Finnhub API."""
+"""US Stock data API endpoints.
+
+Financial data comes from SimFin bulk import.
+Finnhub is only used for live quotes and symbol seeding.
+"""
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -14,18 +18,6 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Global state for tracking batch scrape progress
-_us_scrape_progress: Dict[str, Any] = {
-    "running": False,
-    "current": 0,
-    "total": 0,
-    "current_symbol": "",
-    "success_count": 0,
-    "failed_count": 0,
-    "started_at": None,
-    "results": None,
-}
-
 # Global state for tracking seed progress
 _seed_progress: Dict[str, Any] = {
     "running": False,
@@ -34,6 +26,28 @@ _seed_progress: Dict[str, Any] = {
     "updated_types": 0,
     "started_at": None,
     "completed_at": None,
+}
+
+# Global state for tracking valuation calculation progress
+_valuation_progress: Dict[str, Any] = {
+    "running": False,
+    "current": 0,
+    "total": 0,
+    "current_symbol": "",
+    "success_count": 0,
+    "failed_count": 0,
+    "started_at": None,
+}
+
+# Global state for tracking SimFin import progress
+_simfin_progress: Dict[str, Any] = {
+    "running": False,
+    "stage": "",
+    "records_processed": 0,
+    "records_total": 0,
+    "started_at": None,
+    "completed_at": None,
+    "error": None,
 }
 
 router = APIRouter(prefix="/us-stocks", tags=["US Stocks"])
@@ -90,135 +104,13 @@ class USFinancialRecord(BaseModel):
     net_margin: Optional[float] = None
 
 
-class ScrapeStatusResponse(BaseModel):
-    running: bool
-    current: int
-    total: int
-    current_symbol: str
-    success_count: int
-    failed_count: int
-    progress_percent: Optional[float] = None
-    started_at: Optional[str] = None
-    completed: bool = False
-
-
 class SeedRequest(BaseModel):
     sp500_only: bool = False
 
 
 # ============================================================================
-# API Endpoints
+# API Endpoints - Read Data
 # ============================================================================
-
-@router.get("/debug/finnhub-raw/{symbol}")
-async def debug_finnhub_raw(symbol: str):
-    """Debug endpoint to see raw Finnhub SEC data and available GAAP concepts."""
-    from app.services.finnhub_service import FinnhubService
-    settings = get_settings()
-
-    async with FinnhubService(settings.finnhub_api_key) as service:
-        data = await service._request("stock/financials-reported", {
-            "symbol": symbol.upper(),
-            "freq": "annual"
-        })
-
-    reports = data.get("data", [])
-    if not reports:
-        return {"symbol": symbol, "error": "No SEC data found", "reports": 0}
-
-    # Get all unique GAAP concepts from the first report
-    concepts = set()
-    debt_concepts = []
-    first_report = reports[0] if reports else {}
-    report_data = first_report.get("report", {})
-
-    for section in ["bs", "ic", "cf"]:
-        section_data = report_data.get(section, [])
-        for item in section_data:
-            concept = item.get("concept", "")
-            concepts.add(concept)
-            if "debt" in concept.lower() or "borrow" in concept.lower() or "loan" in concept.lower():
-                debt_concepts.append({"concept": concept, "value": item.get("value")})
-
-    return {
-        "symbol": symbol,
-        "reports_count": len(reports),
-        "first_report_date": first_report.get("endDate"),
-        "debt_related_concepts": debt_concepts,
-        "all_concepts_count": len(concepts),
-        "sample_concepts": sorted(list(concepts))[:30]
-    }
-
-
-@router.get("/debug/yfinance/{symbol}")
-def debug_yfinance(symbol: str):
-    """Debug endpoint to test yfinance on Railway."""
-    import yfinance as yf
-
-    result = {
-        "symbol": symbol,
-        "balance_sheet": None,
-        "income_stmt": None,
-        "info": None,
-        "errors": []
-    }
-
-    try:
-        ticker = yf.Ticker(symbol)
-
-        # Test balance_sheet
-        try:
-            bs = ticker.balance_sheet
-            if bs is not None and not bs.empty:
-                result["balance_sheet"] = {
-                    "status": "OK",
-                    "rows": len(bs.index),
-                    "columns": len(bs.columns),
-                    "total_debt": float(bs.loc["Total Debt"].iloc[0]) if "Total Debt" in bs.index else None
-                }
-            else:
-                result["balance_sheet"] = {"status": "EMPTY"}
-        except Exception as e:
-            result["balance_sheet"] = {"status": "ERROR", "error": str(e)}
-            result["errors"].append(f"balance_sheet: {e}")
-
-        # Test income_stmt
-        try:
-            inc = ticker.income_stmt
-            if inc is not None and not inc.empty:
-                result["income_stmt"] = {
-                    "status": "OK",
-                    "rows": len(inc.index),
-                    "columns": len(inc.columns),
-                    "basic_eps": float(inc.loc["Basic EPS"].iloc[0]) if "Basic EPS" in inc.index else None
-                }
-            else:
-                result["income_stmt"] = {"status": "EMPTY"}
-        except Exception as e:
-            result["income_stmt"] = {"status": "ERROR", "error": str(e)}
-            result["errors"].append(f"income_stmt: {e}")
-
-        # Test info (simpler endpoint)
-        try:
-            info = ticker.info
-            if info:
-                result["info"] = {
-                    "status": "OK",
-                    "trailing_eps": info.get("trailingEps"),
-                    "shares_outstanding": info.get("sharesOutstanding"),
-                    "total_debt": info.get("totalDebt"),
-                }
-            else:
-                result["info"] = {"status": "EMPTY"}
-        except Exception as e:
-            result["info"] = {"status": "ERROR", "error": str(e)}
-            result["errors"].append(f"info: {e}")
-
-    except Exception as e:
-        result["errors"].append(f"ticker creation: {e}")
-
-    return result
-
 
 @router.get("/prices", response_model=List[USStockPrice])
 def get_all_us_prices(
@@ -242,7 +134,7 @@ def get_all_us_prices(
         sector: Filter by sector
         has_valuation: If True, only return stocks with calculated valuations
         filter_type: Filter type (gainers, losers, undervalued, overvalued)
-        sort_by: Column to sort by (symbol, current_price, change, change_pct, market_cap, sticker_price, margin_of_safety, discount_pct, four_m_score)
+        sort_by: Column to sort by
         sort_order: Sort order (asc or desc)
         search: Search term for symbol or company name
     """
@@ -300,9 +192,6 @@ def get_all_us_prices(
 
     # Special handling for discount_pct (calculated field)
     if sort_by == "discount_pct":
-        # Sort by the ratio of current_price to sticker_price
-        # discount_pct = (current_price - sticker_price) / sticker_price * 100
-        # Lower ratio = more undervalued
         from sqlalchemy import case, and_
         discount_expr = case(
             (and_(USStock.sticker_price > 0, USStock.current_price.isnot(None)),
@@ -364,7 +253,6 @@ def get_us_stock_count(
     db: Session = Depends(get_db)
 ):
     """Get total count of US stocks (Common Stock only)."""
-    # Only count Common Stock (exclude ETFs, REITs, ADRs, etc.)
     query = db.query(USStock).filter(USStock.stock_type == "Common Stock")
 
     if sp500_only:
@@ -384,15 +272,7 @@ def get_us_stock_count(
 
 @router.get("/filter-counts")
 def get_us_filter_counts(db: Session = Depends(get_db)):
-    """Get counts for all filter categories in one request.
-
-    Returns counts for: total, sp500, gainers, losers, undervalued, overvalued, with_valuation
-
-    Note: discount is calculated as (current_price - sticker_price) / sticker_price * 100
-    - Positive discount = overvalued (price above sticker)
-    - Negative discount = undervalued (price below sticker)
-    """
-    # Only count Common Stock (exclude ETFs, REITs, ADRs, etc.)
+    """Get counts for all filter categories in one request."""
     result = db.execute(text("""
         SELECT
             COUNT(*) as total,
@@ -448,12 +328,12 @@ def get_us_stock_fundamentals(symbol: str, db: Session = Depends(get_db)):
     if not financials:
         raise HTTPException(
             status_code=404,
-            detail=f"No financial data found for {symbol}. Try triggering a scrape first."
+            detail=f"No financial data found for {symbol}. Run SimFin import first."
         )
 
     return {
         "symbol": symbol.upper(),
-        "source": "finnhub",
+        "source": "simfin",
         "data": [
             USFinancialRecord(
                 year=f.year,
@@ -481,7 +361,7 @@ def get_us_stock_fundamentals(symbol: str, db: Session = Depends(get_db)):
 
 
 # ============================================================================
-# Seed and Scrape Endpoints
+# Seed Endpoints - Populate stock symbols from Finnhub
 # ============================================================================
 
 async def _seed_stocks_background(sp500_only: bool = False):
@@ -551,11 +431,10 @@ async def _seed_stocks_background(sp500_only: bool = False):
                 db.commit()
                 _seed_progress["inserted"] = len(new_stocks)
 
-            # Update existing stocks that don't have stock_type set - use bulk update for speed
+            # Update existing stocks that don't have stock_type set
             updated_types = 0
             stocks_without_type = db.query(USStock.id, USStock.symbol).filter(USStock.stock_type.is_(None)).all()
 
-            # Batch the updates for better performance
             batch_size = 1000
             update_batch = []
             for stock_id, symbol in stocks_without_type:
@@ -563,14 +442,12 @@ async def _seed_stocks_background(sp500_only: bool = False):
                     update_batch.append({"id": stock_id, "stock_type": symbol_type_map[symbol]})
                     updated_types += 1
 
-                # Commit in batches
                 if len(update_batch) >= batch_size:
                     db.bulk_update_mappings(USStock, update_batch)
                     db.commit()
                     _seed_progress["updated_types"] = updated_types
                     update_batch = []
 
-            # Commit any remaining
             if update_batch:
                 db.bulk_update_mappings(USStock, update_batch)
                 db.commit()
@@ -631,129 +508,247 @@ async def get_seed_status():
     return _seed_progress
 
 
-@router.post("/trigger-scrape")
-async def trigger_us_scrape(
-    background_tasks: BackgroundTasks,
-    batch_size: int = Query(default=None),
-    sp500_only: bool = Query(default=False),
-    common_stock_only: bool = Query(default=True, description="Only scrape Common Stock type (skip ETFs, ADRs, etc.)"),
-    symbol: Optional[str] = Query(default=None),
-    db: Session = Depends(get_db)
-):
-    """Trigger scraping of US stock data from Finnhub.
+# ============================================================================
+# SimFin Import Endpoint
+# ============================================================================
 
-    Runs in background. Fetches financials, quotes, and calculates valuations.
+async def _run_simfin_import_background():
+    """Background task to import SimFin data."""
+    global _simfin_progress
+    from app.database import SessionLocal
 
-    Args:
-        batch_size: Number of stocks to scrape (default from settings)
-        sp500_only: If True, only scrape S&P 500 stocks
-        common_stock_only: If True, only scrape Common Stock type (default True)
-        symbol: If provided, only scrape this specific symbol
+    _simfin_progress["running"] = True
+    _simfin_progress["started_at"] = datetime.now().isoformat()
+    _simfin_progress["completed_at"] = None
+    _simfin_progress["error"] = None
+    _simfin_progress["stage"] = "starting"
+
+    try:
+        from app.services.simfin_import import (
+            setup_simfin, download_all_datasets, merge_financial_data,
+            prepare_for_database, import_to_database
+        )
+
+        # Setup
+        _simfin_progress["stage"] = "setup"
+        setup_simfin()
+
+        # Download datasets
+        _simfin_progress["stage"] = "downloading"
+        datasets = download_all_datasets()
+
+        # Merge data
+        _simfin_progress["stage"] = "merging"
+        merged_df = merge_financial_data(datasets)
+
+        # Prepare records
+        _simfin_progress["stage"] = "preparing"
+        records = prepare_for_database(merged_df)
+        _simfin_progress["records_total"] = len(records)
+
+        # Import to database
+        _simfin_progress["stage"] = "importing"
+        imported, updated = import_to_database(records)
+        _simfin_progress["records_processed"] = imported + updated
+
+        _simfin_progress["stage"] = "complete"
+        logger.info(f"SimFin import complete: {imported} new, {updated} updated")
+
+    except Exception as e:
+        logger.error(f"SimFin import failed: {e}")
+        _simfin_progress["error"] = str(e)
+        _simfin_progress["stage"] = "failed"
+
+    finally:
+        _simfin_progress["running"] = False
+        _simfin_progress["completed_at"] = datetime.now().isoformat()
+
+
+@router.post("/import-simfin")
+async def import_simfin_data(background_tasks: BackgroundTasks):
+    """Import financial data from SimFin.
+
+    Downloads bulk financial data (income, balance sheet, cash flow)
+    and imports it to the us_financial_data table.
+
+    Runs in background due to large data volume (~50k+ records).
     """
-    global _us_scrape_progress
+    global _simfin_progress
 
-    if _us_scrape_progress["running"]:
+    if _simfin_progress["running"]:
         return {
             "status": "already_running",
-            "message": "US stock scrape already in progress",
-            "progress": {
-                "current": _us_scrape_progress["current"],
-                "total": _us_scrape_progress["total"],
-                "current_symbol": _us_scrape_progress["current_symbol"],
-            }
+            "message": "SimFin import already in progress",
+            "progress": _simfin_progress,
         }
 
-    settings = get_settings()
-
-    if not settings.finnhub_api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="FINNHUB_API_KEY not configured"
-        )
-
-    batch_size = batch_size or settings.us_scrape_batch_size
-
-    # Get stocks to scrape
-    if symbol:
-        stocks = db.query(USStock).filter(USStock.symbol == symbol.upper()).all()
-    else:
-        query = db.query(USStock)
-
-        if sp500_only:
-            query = query.filter(USStock.is_sp500 == True)
-
-        # Filter to Common Stock only (skip ETFs, ADRs, etc. which don't have SEC filings)
-        if common_stock_only:
-            query = query.filter(USStock.stock_type == "Common Stock")
-
-        # Priority queue: never scraped first, then oldest updates
-        query = query.order_by(
-            USStock.last_fundamental_update.asc().nullsfirst(),
-            USStock.scrape_priority.asc()
-        )
-
-        stocks = query.limit(batch_size).all()
-
-    if not stocks:
-        raise HTTPException(
-            status_code=400,
-            detail="No stocks to scrape. Run /us-stocks/seed first."
-        )
-
-    symbols = [s.symbol for s in stocks]
-
-    # Reset progress
-    _us_scrape_progress = {
-        "running": True,
-        "current": 0,
-        "total": len(symbols),
-        "current_symbol": "",
-        "success_count": 0,
-        "failed_count": 0,
-        "started_at": datetime.now().isoformat(),
-        "results": None,
-    }
-
-    # Start background task
-    background_tasks.add_task(_run_us_scrape, symbols, settings.finnhub_api_key)
+    background_tasks.add_task(_run_simfin_import_background)
 
     return {
         "status": "started",
-        "message": f"Started scraping {len(symbols)} US stocks in background",
-        "total_stocks": len(symbols),
-        "symbols_sample": symbols[:10],
-        "check_progress_at": "/us-stocks/scrape-status"
+        "message": "SimFin import started in background",
+        "check_progress_at": "/us-stocks/simfin-status",
     }
 
 
-@router.get("/scrape-status", response_model=ScrapeStatusResponse)
-def get_us_scrape_status():
-    """Get current status of US stock scraping."""
-    global _us_scrape_progress
+@router.get("/simfin-status")
+async def get_simfin_status():
+    """Get the status of SimFin import."""
+    return _simfin_progress
 
-    progress_percent = None
-    if _us_scrape_progress["total"] > 0:
-        progress_percent = round(
-            _us_scrape_progress["current"] / _us_scrape_progress["total"] * 100, 1
+
+# ============================================================================
+# Valuation Calculation Endpoint
+# ============================================================================
+
+async def _run_valuation_calculation(symbols: List[str]):
+    """Background task to calculate valuations for stocks."""
+    global _valuation_progress
+    from app.database import SessionLocal
+
+    _valuation_progress["running"] = True
+    _valuation_progress["current"] = 0
+    _valuation_progress["total"] = len(symbols)
+    _valuation_progress["success_count"] = 0
+    _valuation_progress["failed_count"] = 0
+    _valuation_progress["started_at"] = datetime.now().isoformat()
+
+    db = SessionLocal()
+
+    try:
+        for i, symbol in enumerate(symbols):
+            if not _valuation_progress["running"]:
+                logger.info("Valuation calculation stopped by user")
+                break
+
+            _valuation_progress["current_symbol"] = symbol
+
+            try:
+                _calculate_us_valuations(db, symbol)
+                _valuation_progress["success_count"] += 1
+            except Exception as e:
+                logger.error(f"Error calculating valuations for {symbol}: {e}")
+                _valuation_progress["failed_count"] += 1
+
+            _valuation_progress["current"] = i + 1
+
+            # Small delay to prevent overload
+            if i < len(symbols) - 1:
+                await asyncio.sleep(0.1)
+
+    finally:
+        _valuation_progress["running"] = False
+        db.close()
+
+
+@router.post("/calculate-valuations")
+async def calculate_valuations(
+    background_tasks: BackgroundTasks,
+    batch_size: int = Query(default=1000),
+    symbol: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db)
+):
+    """Calculate Phil Town valuations for stocks with financial data.
+
+    This recalculates sticker price, Big Five, and 4Ms scores
+    based on existing financial data in the database.
+
+    Args:
+        batch_size: Number of stocks to process
+        symbol: If provided, only calculate for this symbol
+    """
+    global _valuation_progress
+
+    if _valuation_progress["running"]:
+        return {
+            "status": "already_running",
+            "message": "Valuation calculation already in progress",
+            "progress": {
+                "current": _valuation_progress["current"],
+                "total": _valuation_progress["total"],
+                "current_symbol": _valuation_progress["current_symbol"],
+            }
+        }
+
+    # Get stocks to calculate
+    if symbol:
+        symbols = [symbol.upper()]
+    else:
+        # Get symbols that have financial data
+        result = db.execute(text("""
+            SELECT DISTINCT s.symbol
+            FROM us_stocks s
+            JOIN us_financial_data f ON s.symbol = f.stock_symbol
+            WHERE s.stock_type = 'Common Stock'
+            ORDER BY s.symbol
+            LIMIT :limit
+        """), {"limit": batch_size})
+        symbols = [row[0] for row in result.fetchall()]
+
+    if not symbols:
+        raise HTTPException(
+            status_code=400,
+            detail="No stocks with financial data found. Run SimFin import first."
         )
 
-    return ScrapeStatusResponse(
-        running=_us_scrape_progress["running"],
-        current=_us_scrape_progress["current"],
-        total=_us_scrape_progress["total"],
-        current_symbol=_us_scrape_progress["current_symbol"],
-        success_count=_us_scrape_progress["success_count"],
-        failed_count=_us_scrape_progress["failed_count"],
-        progress_percent=progress_percent,
-        started_at=_us_scrape_progress["started_at"],
-        completed=not _us_scrape_progress["running"] and _us_scrape_progress["results"] is not None,
-    )
+    background_tasks.add_task(_run_valuation_calculation, symbols)
 
+    return {
+        "status": "started",
+        "message": f"Started calculating valuations for {len(symbols)} stocks",
+        "total_stocks": len(symbols),
+        "check_progress_at": "/us-stocks/valuation-status",
+    }
+
+
+@router.get("/valuation-status")
+def get_valuation_status():
+    """Get current status of valuation calculation."""
+    global _valuation_progress
+
+    progress_percent = None
+    if _valuation_progress["total"] > 0:
+        progress_percent = round(
+            _valuation_progress["current"] / _valuation_progress["total"] * 100, 1
+        )
+
+    return {
+        "running": _valuation_progress["running"],
+        "current": _valuation_progress["current"],
+        "total": _valuation_progress["total"],
+        "current_symbol": _valuation_progress["current_symbol"],
+        "success_count": _valuation_progress["success_count"],
+        "failed_count": _valuation_progress["failed_count"],
+        "progress_percent": progress_percent,
+        "started_at": _valuation_progress["started_at"],
+    }
+
+
+@router.post("/stop-calculations")
+def stop_calculations():
+    """Stop the running valuation calculations."""
+    global _valuation_progress
+
+    if not _valuation_progress["running"]:
+        return {"status": "not_running", "message": "No calculation is running"}
+
+    _valuation_progress["running"] = False
+
+    return {
+        "status": "stopping",
+        "message": "Calculations will stop after current stock completes",
+        "calculated_so_far": _valuation_progress["current"],
+    }
+
+
+# ============================================================================
+# Stats Endpoint
+# ============================================================================
 
 @router.get("/stats")
 def get_us_stocks_stats(db: Session = Depends(get_db)):
-    """Get statistics about US stock scraping progress."""
-    from sqlalchemy import func, text
+    """Get statistics about US stock data."""
+    from sqlalchemy import func
 
     # Total stocks in database
     total_stocks = db.query(func.count(USStock.id)).scalar()
@@ -772,22 +767,15 @@ def get_us_stocks_stats(db: Session = Depends(get_db)):
         SELECT COUNT(DISTINCT stock_symbol) FROM us_financial_data
     """)).scalar()
 
-    # Stocks attempted (has last_fundamental_update)
-    stocks_attempted = db.query(func.count(USStock.id)).filter(
-        USStock.last_fundamental_update.isnot(None)
+    # Stocks with valuations
+    stocks_with_valuations = db.query(func.count(USStock.id)).filter(
+        USStock.valuation_status == "CALCULABLE"
     ).scalar()
 
     # Common Stock stats
     common_stock_total = db.query(func.count(USStock.id)).filter(
         USStock.stock_type == "Common Stock"
     ).scalar()
-
-    common_stock_attempted = db.query(func.count(USStock.id)).filter(
-        USStock.stock_type == "Common Stock",
-        USStock.last_fundamental_update.isnot(None)
-    ).scalar()
-
-    common_stock_pending = common_stock_total - common_stock_attempted if common_stock_total else 0
 
     # S&P 500 stats
     sp500_total = db.query(func.count(USStock.id)).filter(USStock.is_sp500 == True).scalar()
@@ -798,18 +786,12 @@ def get_us_stocks_stats(db: Session = Depends(get_db)):
         WHERE s.is_sp500 = true
     """)).scalar()
 
-    # Success rate
-    success_rate = round(stocks_with_data / stocks_attempted * 100, 1) if stocks_attempted > 0 else 0
-
     return {
         "total_stocks_in_db": total_stocks,
         "stocks_with_financial_data": stocks_with_data,
-        "stocks_attempted": stocks_attempted,
-        "success_rate_pct": success_rate,
+        "stocks_with_valuations": stocks_with_valuations,
         "common_stock": {
             "total": common_stock_total,
-            "attempted": common_stock_attempted,
-            "pending": common_stock_pending,
         },
         "sp500": {
             "total": sp500_total,
@@ -819,216 +801,9 @@ def get_us_stocks_stats(db: Session = Depends(get_db)):
     }
 
 
-@router.post("/stop-scrape")
-def stop_us_scrape():
-    """Stop the running US stock scrape."""
-    global _us_scrape_progress
-
-    if not _us_scrape_progress["running"]:
-        return {"status": "not_running", "message": "No scrape is running"}
-
-    _us_scrape_progress["running"] = False
-
-    return {
-        "status": "stopping",
-        "message": "Scrape will stop after current stock completes",
-        "scraped_so_far": _us_scrape_progress["current"],
-    }
-
-
 # ============================================================================
-# Background Scrape Task
+# Valuation Calculation Function
 # ============================================================================
-
-async def _run_us_scrape(symbols: List[str], api_key: str):
-    """Background task to scrape US stock data."""
-    global _us_scrape_progress
-
-    from app.database import SessionLocal
-    from app.services.finnhub_service import FinnhubService
-
-    db = SessionLocal()
-
-    try:
-        async with FinnhubService(api_key) as service:
-            results = {"success": [], "failed": []}
-
-            for i, symbol in enumerate(symbols):
-                if not _us_scrape_progress["running"]:
-                    logger.info("US scrape stopped by user")
-                    break
-
-                _us_scrape_progress["current_symbol"] = symbol
-
-                try:
-                    # Scrape data
-                    data = await service.scrape_stock(symbol)
-
-                    # Save to database
-                    _save_us_stock_data(db, symbol, data)
-
-                    # Calculate valuations
-                    _calculate_us_valuations(db, symbol)
-
-                    results["success"].append(symbol)
-                    _us_scrape_progress["success_count"] += 1
-
-                except Exception as e:
-                    logger.error(f"Error scraping {symbol}: {e}")
-                    results["failed"].append({"symbol": symbol, "error": str(e)})
-                    _us_scrape_progress["failed_count"] += 1
-
-                _us_scrape_progress["current"] = i + 1
-
-                # Small delay between stocks (rate limiter handles most)
-                if i < len(symbols) - 1:
-                    await asyncio.sleep(0.5)
-
-            results["completed_at"] = datetime.now().isoformat()
-            _us_scrape_progress["results"] = results
-
-    except Exception as e:
-        logger.error(f"US scrape error: {e}")
-        _us_scrape_progress["results"] = {"error": str(e)}
-
-    finally:
-        _us_scrape_progress["running"] = False
-        db.close()
-
-
-def _save_us_stock_data(db: Session, symbol: str, data: Dict):
-    """Save scraped Finnhub data to database."""
-    from app.stock_data.stock_splits import adjust_eps_for_splits
-
-    stock = db.query(USStock).filter(USStock.symbol == symbol).first()
-
-    if not stock:
-        stock = USStock(symbol=symbol)
-        db.add(stock)
-
-    # Update quote data
-    if data.get("quote"):
-        quote = data["quote"]
-        stock.current_price = quote.get("current_price")
-        stock.previous_close = quote.get("previous_close")
-        stock.change = quote.get("change")
-        stock.change_pct = quote.get("change_pct")
-        stock.last_price_update = datetime.now()
-
-    # Update profile data
-    if data.get("profile"):
-        profile = data["profile"]
-        stock.name = profile.get("name") or stock.name
-        stock.sector = profile.get("sector") or stock.sector
-        # Market cap comes in millions, convert to actual
-        if profile.get("market_cap"):
-            stock.market_cap = int(profile["market_cap"] * 1_000_000)
-
-    # Update metrics
-    if data.get("metrics"):
-        metrics = data["metrics"]
-        stock.high_52w = metrics.get("high_52w")
-        stock.low_52w = metrics.get("low_52w")
-
-    # Save financial data
-    if data.get("financials"):
-        for year, fin_data in data["financials"].items():
-            if not isinstance(year, int):
-                try:
-                    year = int(year)
-                except:
-                    continue
-
-            existing = db.query(USFinancialData).filter(
-                USFinancialData.stock_symbol == symbol,
-                USFinancialData.year == year
-            ).first()
-
-            if not existing:
-                existing = USFinancialData(stock_symbol=symbol, year=year)
-                db.add(existing)
-
-            # Update fields
-            for field in ["revenue", "net_income", "eps", "total_equity",
-                         "total_assets", "total_liabilities", "current_liabilities",
-                         "total_debt", "operating_cash_flow", "capital_expenditure",
-                         "gross_profit", "operating_income"]:
-                if field in fin_data:
-                    value = fin_data[field]
-                    # Apply stock split adjustment to EPS
-                    # Skip for stocks in FINNHUB_EPS_PROBLEM_SYMBOLS - their EPS comes
-                    # from yfinance which is already split-adjusted
-                    if field == "eps" and value is not None:
-                        from app.services.finnhub_service import FINNHUB_EPS_PROBLEM_SYMBOLS
-                        if symbol not in FINNHUB_EPS_PROBLEM_SYMBOLS:
-                            value = adjust_eps_for_splits(symbol, year, value)
-                    setattr(existing, field, value)
-
-            # Calculate derived metrics
-            _calculate_financial_ratios(existing)
-
-    stock.last_fundamental_update = datetime.now()
-    stock.updated_at = datetime.now()
-
-    db.commit()
-
-
-def _calculate_financial_ratios(record: USFinancialData):
-    """Calculate financial ratios from raw data."""
-    # Free Cash Flow
-    if record.operating_cash_flow and record.capital_expenditure:
-        record.free_cash_flow = record.operating_cash_flow - abs(record.capital_expenditure)
-
-    # ROE - Only calculate if equity is positive
-    # Negative equity (from aggressive buybacks) makes ROE meaningless
-    if record.net_income and record.total_equity and record.total_equity > 0:
-        record.roe = (record.net_income / record.total_equity) * 100
-    else:
-        # Explicitly set to None for negative equity to avoid misleading values
-        record.roe = None
-
-    # ROIC - Return on Invested Capital (works even with negative equity)
-    # ROIC = NOPAT / Invested Capital
-    # NOPAT = Operating Income * (1 - Tax Rate), estimate 25% tax rate
-    # Invested Capital = Total Assets - Current Liabilities (proper formula)
-    if record.operating_income and record.total_assets:
-        # Calculate invested capital using proper formula
-        # This works regardless of equity being positive or negative
-        if record.current_liabilities is not None:
-            invested_capital = record.total_assets - record.current_liabilities
-        else:
-            # Fallback to old method if current_liabilities not available
-            invested_capital = (record.total_equity or 0) + (record.total_debt or 0)
-
-        if invested_capital > 0:
-            # Estimate NOPAT with 25% tax rate
-            nopat = record.operating_income * 0.75
-            record.roic = (nopat / invested_capital) * 100
-        else:
-            record.roic = None
-    else:
-        record.roic = None
-
-    # ROA
-    if record.net_income and record.total_assets and record.total_assets > 0:
-        record.roa = (record.net_income / record.total_assets) * 100
-
-    # Debt to Equity - Only meaningful with positive equity
-    if record.total_debt is not None and record.total_equity and record.total_equity > 0:
-        record.debt_to_equity = record.total_debt / record.total_equity
-    else:
-        # Negative equity makes D/E ratio meaningless
-        record.debt_to_equity = None
-
-    # Margins
-    if record.revenue and record.revenue > 0:
-        if record.gross_profit:
-            record.gross_margin = (record.gross_profit / record.revenue) * 100
-        if record.operating_income:
-            record.operating_margin = (record.operating_income / record.revenue) * 100
-        if record.net_income:
-            record.net_margin = (record.net_income / record.revenue) * 100
-
 
 def _calculate_us_valuations(db: Session, symbol: str):
     """Calculate Phil Town valuations for a US stock."""
@@ -1061,31 +836,46 @@ def _calculate_us_valuations(db: Session, symbol: str):
                 "operating_cash_flow": f.operating_cash_flow,
                 "free_cash_flow": f.free_cash_flow,
                 "roe": f.roe,
+                "roic": f.roic,
                 "debt_to_equity": f.debt_to_equity,
                 "gross_margin": f.gross_margin,
                 "operating_margin": f.operating_margin,
                 "net_income": f.net_income,
             })
 
+        # Extract history arrays
+        years_list = [f.year for f in financials]
+        eps_history = [f.eps for f in financials]
+        revenue_history = [f.revenue for f in financials]
+        equity_history = [f.total_equity for f in financials]
+        ocf_history = [f.operating_cash_flow for f in financials]
+        fcf_history = [f.free_cash_flow for f in financials]
+
         # Calculate Big Five
         big_five_calc = BigFiveCalculator()
-        big_five_result = big_five_calc.calculate_from_financials(fin_data)
+        big_five_result = big_five_calc.calculate(
+            revenue_history=revenue_history,
+            eps_history=eps_history,
+            equity_history=equity_history,
+            operating_cf_history=ocf_history,
+            free_cf_history=fcf_history,
+            years_list=years_list,
+        )
         stock.big_five_score = big_five_result.score
-        stock.big_five_warning = not big_five_result.passes  # Warn if score < 3
+        stock.big_five_warning = not big_five_result.passes
 
         # Calculate Sticker Price
-        eps_history = [f.eps for f in financials if f.eps is not None]
-        if len(eps_history) < 2:
+        eps_for_sticker = [e for e in eps_history if e is not None]
+        if len(eps_for_sticker) < 2:
             stock.valuation_status = "NOT_CALCULABLE"
             stock.valuation_note = "Missing EPS data for sticker price calculation"
             db.commit()
             return
 
-        # Get average PE from metrics or use default
         pe_avg = 15.0  # Default PE
         sticker_calc = StickerPriceCalculator()
         sticker_result = sticker_calc.calculate_from_financials(
-            eps_history=eps_history,
+            eps_history=eps_for_sticker,
             historical_pe=pe_avg,
             current_price=stock.current_price
         )
@@ -1095,15 +885,13 @@ def _calculate_us_valuations(db: Session, symbol: str):
             stock.margin_of_safety = sticker_result.margin_of_safety
             stock.discount_to_sticker = sticker_result.discount_to_sticker
 
-            # Calculate 4Ms - extract history arrays from fin_data
-            revenue_history = [f.get("revenue") for f in fin_data if f.get("revenue") is not None]
-            net_income_history = [f.get("net_income") for f in fin_data if f.get("net_income") is not None]
-            roe_history = [f.get("roe") for f in fin_data if f.get("roe") is not None]
-            roic_history = [f.get("roic") for f in fin_data if f.get("roic") is not None]
-            gross_margin_history = [f.get("gross_margin") for f in fin_data if f.get("gross_margin") is not None]
-            operating_margin_history = [f.get("operating_margin") for f in fin_data if f.get("operating_margin") is not None]
-            debt_to_equity_history = [f.get("debt_to_equity") for f in fin_data if f.get("debt_to_equity") is not None]
-            fcf_history = [f.get("free_cash_flow") for f in fin_data if f.get("free_cash_flow") is not None]
+            # Calculate 4Ms
+            net_income_history = [f.get("net_income") for f in fin_data]
+            roe_history = [f.get("roe") for f in fin_data]
+            roic_history = [f.get("roic") for f in fin_data]
+            gross_margin_history = [f.get("gross_margin") for f in fin_data]
+            operating_margin_history = [f.get("operating_margin") for f in fin_data]
+            debt_to_equity_history = [f.get("debt_to_equity") for f in fin_data]
 
             four_ms_eval = FourMsEvaluator()
             four_ms_result = four_ms_eval.evaluate(
@@ -1116,6 +904,7 @@ def _calculate_us_valuations(db: Session, symbol: str):
                 roic_history=roic_history,
                 debt_to_equity_history=debt_to_equity_history,
                 fcf_history=fcf_history,
+                equity_history=equity_history,
                 current_price=stock.current_price or 0,
                 sticker_price=sticker_result.sticker_price,
                 big_five_score=big_five_result.score,
@@ -1123,8 +912,6 @@ def _calculate_us_valuations(db: Session, symbol: str):
 
             stock.four_m_score = four_ms_result.overall_score
             stock.four_m_grade = four_ms_result.overall_grade
-
-            # Use Four Ms recommendation (which considers Big Five, MOS, and overall score)
             stock.recommendation = four_ms_result.recommendation
 
             stock.valuation_status = "CALCULABLE"
@@ -1134,6 +921,7 @@ def _calculate_us_valuations(db: Session, symbol: str):
             stock.valuation_note = sticker_result.note or "Could not calculate sticker price"
 
         stock.last_valuation_update = datetime.now()
+        stock.last_fundamental_update = datetime.now()
         db.commit()
 
     except Exception as e:
@@ -1143,177 +931,8 @@ def _calculate_us_valuations(db: Session, symbol: str):
         db.commit()
 
 
-def _get_recommendation(discount_pct: Optional[float], big_five_warning: bool, grade: Optional[str]) -> str:
-    """Determine investment recommendation.
-
-    discount_pct is calculated as: (sticker_price - current_price) / sticker_price * 100
-    - Positive = undervalued (price below sticker) = good
-    - Negative = overvalued (price above sticker) = bad
-    """
-    if discount_pct is None:
-        return "HOLD"
-
-    # Cap at HOLD if Big Five fails (even if undervalued)
-    if big_five_warning:
-        if discount_pct >= 50:
-            return "HOLD"  # Would be STRONG_BUY but capped due to Big Five
-        return "HOLD"
-
-    # Normal recommendation logic
-    # Positive discount = undervalued = BUY territory
-    # Negative discount = overvalued = SELL territory
-    if discount_pct >= 50:
-        return "STRONG_BUY"  # 50%+ below sticker price
-    elif discount_pct >= 30:
-        return "BUY"  # 30-50% below sticker
-    elif discount_pct >= -30:
-        return "HOLD"  # Within 30% of sticker (either direction)
-    elif discount_pct >= -50:
-        return "SELL"  # 30-50% above sticker
-    else:
-        return "STRONG_SELL"  # 50%+ above sticker price
-
-
 # ============================================================================
-# Split Adjustment Fix Endpoint
-# ============================================================================
-
-@router.post("/fix-splits")
-def fix_stock_splits(
-    dry_run: bool = Query(default=True, description="If True, show what would be fixed without making changes"),
-    db: Session = Depends(get_db)
-):
-    """
-    Automatically fix EPS values for stock splits.
-
-    This endpoint:
-    1. Fetches all stocks with EPS data from the database
-    2. Checks yfinance for stock split history
-    3. Calculates adjustment factors for historical EPS
-    4. Updates the database (if dry_run=False)
-
-    Args:
-        dry_run: If True (default), only show what would be fixed. Set to False to apply changes.
-
-    Returns:
-        Summary of stocks that need/were fixed
-    """
-    try:
-        from app.services.split_adjustment import apply_split_adjustments
-
-        result = apply_split_adjustments(db, dry_run=dry_run)
-
-        return {
-            "status": "success",
-            "dry_run": dry_run,
-            "message": f"{'Would fix' if dry_run else 'Fixed'} {result['total_records_adjusted']} EPS records across {result['total_stocks_adjusted']} stocks",
-            "summary": {
-                "total_stocks_adjusted": result["total_stocks_adjusted"],
-                "total_records_adjusted": result["total_records_adjusted"],
-            },
-            "stocks": result["stocks"],
-            "note": "Run with dry_run=false to apply changes" if dry_run else "Changes applied successfully"
-        }
-
-    except ImportError as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"yfinance not installed. Run: pip install yfinance. Error: {str(e)}"
-        )
-    except Exception as e:
-        logger.error(f"Error fixing splits: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/fix-splits/{symbol}")
-def fix_single_stock_splits(
-    symbol: str,
-    dry_run: bool = Query(default=True),
-    db: Session = Depends(get_db)
-):
-    """Fix EPS values for a single stock's splits."""
-    from sqlalchemy import text
-
-    try:
-        from app.services.split_adjustment import get_stock_splits, calculate_split_factor
-
-        symbol = symbol.upper()
-        splits = get_stock_splits(symbol)
-
-        if not splits:
-            return {
-                "symbol": symbol,
-                "status": "no_splits",
-                "message": f"No stock splits found for {symbol}"
-            }
-
-        # Get EPS data
-        result = db.execute(text("""
-            SELECT id, year, eps
-            FROM us_financial_data
-            WHERE stock_symbol = :symbol AND eps IS NOT NULL
-            ORDER BY year
-        """), {"symbol": symbol})
-
-        eps_data = [{"id": row[0], "year": row[1], "eps": float(row[2])} for row in result.fetchall()]
-
-        if not eps_data:
-            return {
-                "symbol": symbol,
-                "status": "no_data",
-                "message": f"No EPS data found for {symbol}"
-            }
-
-        # Calculate adjustments
-        adjustments = []
-        for record in eps_data:
-            factor = calculate_split_factor(splits, record["year"])
-            if factor > 1:
-                adjustments.append({
-                    "id": record["id"],
-                    "year": record["year"],
-                    "old_eps": record["eps"],
-                    "new_eps": round(record["eps"] / factor, 4),
-                    "factor": factor
-                })
-
-        if not adjustments:
-            return {
-                "symbol": symbol,
-                "status": "no_adjustment_needed",
-                "message": f"All EPS data for {symbol} is already adjusted",
-                "splits": splits
-            }
-
-        # Apply if not dry run
-        if not dry_run:
-            for adj in adjustments:
-                db.execute(text("""
-                    UPDATE us_financial_data
-                    SET eps = :new_eps, updated_at = NOW()
-                    WHERE id = :id
-                """), {"new_eps": adj["new_eps"], "id": adj["id"]})
-            db.commit()
-
-        return {
-            "symbol": symbol,
-            "status": "success",
-            "dry_run": dry_run,
-            "splits": splits,
-            "adjustments_count": len(adjustments),
-            "adjustments": adjustments,
-            "message": f"{'Would fix' if dry_run else 'Fixed'} {len(adjustments)} EPS records"
-        }
-
-    except ImportError as e:
-        raise HTTPException(status_code=500, detail=f"yfinance not installed: {e}")
-    except Exception as e:
-        logger.error(f"Error fixing splits for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================================================
-# Single Stock Route (MUST be at end to avoid matching /scrape-status etc)
+# Single Stock Route (MUST be at end to avoid matching other routes)
 # ============================================================================
 
 @router.get("/{symbol}", response_model=USStockPrice)
@@ -1356,7 +975,7 @@ def get_us_stock_price(symbol: str, db: Session = Depends(get_db)):
 
 
 # ============================================================================
-# US Stock Analysis Endpoints (like DSE calculator)
+# US Stock Analysis Endpoints
 # ============================================================================
 
 @router.get("/{symbol}/big-five")
@@ -1374,10 +993,10 @@ def get_us_big_five(symbol: str, db: Session = Depends(get_db)):
     if len(financials) < 2:
         raise HTTPException(
             status_code=404,
-            detail=f"Insufficient financial data for {symbol}. Try triggering a scrape first."
+            detail=f"Insufficient financial data for {symbol}. Run SimFin import first."
         )
 
-    # Extract data series (keep all values to maintain year alignment)
+    # Extract data series
     years_list = [f.year for f in financials]
     revenue_history = [f.revenue for f in financials]
     eps_history = [f.eps for f in financials]
@@ -1433,7 +1052,7 @@ def get_us_four_ms(symbol: str, db: Session = Depends(get_db)):
             detail=f"Insufficient financial data for {symbol}"
         )
 
-    # Extract all data series (keep all values to maintain year alignment for CAGR)
+    # Extract all data series
     years_list = [f.year for f in financials]
     revenue_history = [f.revenue for f in financials]
     net_income_history = [f.net_income for f in financials]
@@ -1449,7 +1068,7 @@ def get_us_four_ms(symbol: str, db: Session = Depends(get_db)):
 
     current_price = stock.current_price or 0
 
-    # Calculate sticker price (filter None for this calculation)
+    # Calculate sticker price
     eps_for_sticker = [e for e in eps_history if e is not None]
     sticker_calc = StickerPriceCalculator()
     sticker_price = 0
@@ -1457,7 +1076,7 @@ def get_us_four_ms(symbol: str, db: Session = Depends(get_db)):
     if len(eps_for_sticker) >= 2:
         sticker_result = sticker_calc.calculate_from_financials(
             eps_history=eps_for_sticker,
-            historical_pe=15.0,  # Default PE for US stocks
+            historical_pe=15.0,
         )
         if sticker_result.status == "CALCULABLE":
             sticker_price = sticker_result.sticker_price
@@ -1517,12 +1136,12 @@ def get_us_full_analysis(symbol: str, db: Session = Depends(get_db)):
     if len(financials) < 2:
         raise HTTPException(
             status_code=404,
-            detail=f"Insufficient financial data for {symbol}. Trigger a scrape first."
+            detail=f"Insufficient financial data for {symbol}. Run SimFin import first."
         )
 
     current_price = stock.current_price
 
-    # Extract data series (keep all values to maintain year alignment for CAGR)
+    # Extract data series
     years_list = [f.year for f in financials]
     eps_history = [f.eps for f in financials]
     revenue_history = [f.revenue for f in financials]
@@ -1536,7 +1155,7 @@ def get_us_full_analysis(symbol: str, db: Session = Depends(get_db)):
     equity_history = [f.total_equity for f in financials]
     ocf_history = [f.operating_cash_flow for f in financials]
 
-    # Calculate Sticker Price (filter None for this calculation)
+    # Calculate Sticker Price
     eps_for_sticker = [e for e in eps_history if e is not None]
     sticker_calc = StickerPriceCalculator()
     sticker_result = None
