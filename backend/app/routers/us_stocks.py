@@ -51,6 +51,18 @@ _simfin_progress: Dict[str, Any] = {
     "error": None,
 }
 
+# Global state for tracking price update progress
+_price_progress: Dict[str, Any] = {
+    "running": False,
+    "current": 0,
+    "total": 0,
+    "current_symbol": "",
+    "success_count": 0,
+    "failed_count": 0,
+    "started_at": None,
+    "completed_at": None,
+}
+
 router = APIRouter(prefix="/us-stocks", tags=["US Stocks"])
 
 
@@ -865,6 +877,182 @@ def stop_calculations():
         "status": "stopping",
         "message": "Calculations will stop after current stock completes",
         "calculated_so_far": _valuation_progress["current"],
+    }
+
+
+# ============================================================================
+# Price Update Endpoints
+# ============================================================================
+
+async def _run_price_update(symbols: List[str], db_url: str):
+    """Background task to fetch prices for stocks."""
+    global _price_progress
+    from app.services.finnhub_service import FinnhubService
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine(db_url)
+    SessionLocal = sessionmaker(bind=engine)
+    db = SessionLocal()
+
+    finnhub = FinnhubService()
+
+    try:
+        _price_progress["total"] = len(symbols)
+        _price_progress["started_at"] = datetime.now().isoformat()
+
+        for i, symbol in enumerate(symbols):
+            if not _price_progress["running"]:
+                logger.info("Price update stopped by user")
+                break
+
+            _price_progress["current"] = i + 1
+            _price_progress["current_symbol"] = symbol
+
+            try:
+                quote = await finnhub.get_quote(symbol)
+
+                if quote.get("current_price"):
+                    db.execute(text("""
+                        UPDATE us_stocks SET
+                            current_price = :price,
+                            previous_close = :prev_close,
+                            change = :change,
+                            change_pct = :change_pct,
+                            last_price_update = NOW()
+                        WHERE symbol = :symbol
+                    """), {
+                        "price": quote.get("current_price"),
+                        "prev_close": quote.get("previous_close"),
+                        "change": quote.get("change"),
+                        "change_pct": quote.get("change_pct"),
+                        "symbol": symbol,
+                    })
+                    db.commit()
+                    _price_progress["success_count"] += 1
+                else:
+                    _price_progress["failed_count"] += 1
+                    logger.warning(f"No price data for {symbol}")
+
+            except Exception as e:
+                _price_progress["failed_count"] += 1
+                logger.error(f"Error fetching price for {symbol}: {e}")
+
+            # Small delay to respect rate limits
+            await asyncio.sleep(0.1)
+
+        _price_progress["completed_at"] = datetime.now().isoformat()
+
+    finally:
+        _price_progress["running"] = False
+        db.close()
+
+
+@router.post("/update-prices")
+async def update_prices(
+    background_tasks: BackgroundTasks,
+    batch_size: int = Query(default=500),
+    missing_only: bool = Query(default=True),
+    db: Session = Depends(get_db)
+):
+    """Fetch current prices for stocks from Finnhub/yfinance.
+
+    Args:
+        batch_size: Number of stocks to process
+        missing_only: If True, only fetch for stocks without prices
+    """
+    global _price_progress
+
+    if _price_progress["running"]:
+        return {
+            "status": "already_running",
+            "message": "Price update already in progress",
+            "progress": {
+                "current": _price_progress["current"],
+                "total": _price_progress["total"],
+            }
+        }
+
+    # Get symbols to update
+    if missing_only:
+        result = db.execute(text("""
+            SELECT symbol FROM us_stocks
+            WHERE current_price IS NULL
+            ORDER BY symbol
+            LIMIT :limit
+        """), {"limit": batch_size})
+    else:
+        result = db.execute(text("""
+            SELECT symbol FROM us_stocks
+            ORDER BY last_price_update NULLS FIRST
+            LIMIT :limit
+        """), {"limit": batch_size})
+
+    symbols = [row[0] for row in result.fetchall()]
+
+    if not symbols:
+        return {"status": "complete", "message": "All stocks have prices"}
+
+    # Reset progress
+    _price_progress = {
+        "running": True,
+        "current": 0,
+        "total": len(symbols),
+        "current_symbol": "",
+        "success_count": 0,
+        "failed_count": 0,
+        "started_at": None,
+        "completed_at": None,
+    }
+
+    # Get database URL for background task
+    from app.config import get_settings
+    db_url = get_settings().database_url
+
+    background_tasks.add_task(_run_price_update, symbols, db_url)
+
+    return {
+        "status": "started",
+        "message": f"Started fetching prices for {len(symbols)} stocks",
+        "total_stocks": len(symbols),
+        "check_progress_at": "/us-stocks/price-update-status",
+    }
+
+
+@router.get("/price-update-status")
+def get_price_update_status():
+    """Get the status of the price update."""
+    progress_percent = 0
+    if _price_progress["total"] > 0:
+        progress_percent = round(_price_progress["current"] / _price_progress["total"] * 100, 1)
+
+    return {
+        "running": _price_progress["running"],
+        "current": _price_progress["current"],
+        "total": _price_progress["total"],
+        "current_symbol": _price_progress["current_symbol"],
+        "success_count": _price_progress["success_count"],
+        "failed_count": _price_progress["failed_count"],
+        "progress_percent": progress_percent,
+        "started_at": _price_progress["started_at"],
+        "completed_at": _price_progress["completed_at"],
+    }
+
+
+@router.post("/stop-price-update")
+def stop_price_update():
+    """Stop the running price update."""
+    global _price_progress
+
+    if not _price_progress["running"]:
+        return {"status": "not_running", "message": "No price update is running"}
+
+    _price_progress["running"] = False
+
+    return {
+        "status": "stopping",
+        "message": "Price update will stop after current stock completes",
+        "fetched_so_far": _price_progress["current"],
     }
 
 
