@@ -412,9 +412,15 @@ class FourMsEvaluator:
         # Filter valid ROIC values
         valid_roic = [r for r in (roic_history or []) if r is not None and r > 0]
 
+        # Check for valid ROE in RECENT years (last 5 data points)
+        # Old ROE values from years ago are misleading if equity has since turned negative
+        recent_roe = roe_history[-5:] if len(roe_history) >= 5 else roe_history
+        recent_valid_roe = [r for r in recent_roe if r is not None and -100 <= r <= 100]
+
         # Determine if we should use ROIC instead of ROE
-        # Use ROIC if: less than 3 valid ROE values but have ROIC data
-        use_roic = len(valid_roe) < 3 and len(valid_roic) >= 3
+        # Use ROIC if: fewer than 2 valid ROE values in recent years, but have ROIC data
+        # This catches cases like ORLY where old ROE exists but recent years are all invalid
+        use_roic = len(recent_valid_roe) < 2 and len(valid_roic) >= 3
         has_negative_equity = len(valid_roe) < len([r for r in roe_history if r is not None])
 
         # 1. Return on Capital Level (30 points)
@@ -576,8 +582,14 @@ class FourMsEvaluator:
         # Filter valid ROIC values
         valid_roic = [r for r in (roic_history or []) if r is not None and r > 0]
 
+        # Check for valid ROE in RECENT years (last 5 data points)
+        # Old ROE values are misleading if equity has since turned negative from buybacks
+        recent_roe = roe_history[-5:] if len(roe_history) >= 5 else roe_history
+        recent_valid_roe = [r for r in recent_roe if r is not None and -100 <= r <= 100]
+
         # Determine if we should use ROIC instead of ROE
-        use_roic = len(valid_roe) < 3 and len(valid_roic) >= 3
+        # Use ROIC if: fewer than 2 valid ROE values in recent years, but have ROIC data
+        use_roic = len(recent_valid_roe) < 2 and len(valid_roic) >= 3
 
         # 1. Return on Capital Consistency (34 points)
         if use_roic and len(valid_roic) >= 2:
