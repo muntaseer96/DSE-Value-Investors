@@ -148,6 +148,45 @@ def _get_yfinance_quote(symbol: str) -> Optional[Dict]:
         return None
 
 
+def _get_yfinance_debt(symbol: str) -> Optional[Dict[int, float]]:
+    """
+    Fallback to get total debt by year from yfinance when Finnhub doesn't have it.
+
+    Args:
+        symbol: Stock symbol
+
+    Returns:
+        Dict mapping year to total_debt, or None if failed
+    """
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        bs = ticker.balance_sheet
+
+        if bs is None or bs.empty:
+            return None
+
+        # Look for Total Debt in balance sheet
+        if "Total Debt" not in bs.index:
+            return None
+
+        debt_series = bs.loc["Total Debt"]
+        result = {}
+
+        for date, value in debt_series.items():
+            if value is not None and not (hasattr(value, '__float__') and value != value):  # Check for NaN
+                year = date.year
+                result[year] = float(value)
+
+        if result:
+            logger.info(f"yfinance debt fallback for {symbol}: found {len(result)} years")
+        return result if result else None
+
+    except Exception as e:
+        logger.warning(f"yfinance debt fallback failed for {symbol}: {e}")
+        return None
+
+
 class RateLimiter:
     """Simple rate limiter for API calls."""
 
@@ -434,6 +473,20 @@ class FinnhubService:
 
         # Apply stock split adjustment to EPS values
         financials_by_year = apply_split_adjustment(financials_by_year, symbol)
+
+        # Check if any years are missing debt data - use yfinance fallback
+        years_missing_debt = [
+            year for year, data in financials_by_year.items()
+            if data.get("total_debt") is None
+        ]
+
+        if years_missing_debt:
+            yf_debt = _get_yfinance_debt(symbol)
+            if yf_debt:
+                for year in years_missing_debt:
+                    if year in yf_debt:
+                        financials_by_year[year]["total_debt"] = yf_debt[year]
+                        logger.debug(f"{symbol} {year}: debt filled from yfinance: {yf_debt[year]}")
 
         return financials_by_year
 
