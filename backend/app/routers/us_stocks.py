@@ -110,6 +110,76 @@ class SeedRequest(BaseModel):
 # API Endpoints
 # ============================================================================
 
+@router.get("/debug/yfinance/{symbol}")
+def debug_yfinance(symbol: str):
+    """Debug endpoint to test yfinance on Railway."""
+    import yfinance as yf
+
+    result = {
+        "symbol": symbol,
+        "balance_sheet": None,
+        "income_stmt": None,
+        "info": None,
+        "errors": []
+    }
+
+    try:
+        ticker = yf.Ticker(symbol)
+
+        # Test balance_sheet
+        try:
+            bs = ticker.balance_sheet
+            if bs is not None and not bs.empty:
+                result["balance_sheet"] = {
+                    "status": "OK",
+                    "rows": len(bs.index),
+                    "columns": len(bs.columns),
+                    "total_debt": float(bs.loc["Total Debt"].iloc[0]) if "Total Debt" in bs.index else None
+                }
+            else:
+                result["balance_sheet"] = {"status": "EMPTY"}
+        except Exception as e:
+            result["balance_sheet"] = {"status": "ERROR", "error": str(e)}
+            result["errors"].append(f"balance_sheet: {e}")
+
+        # Test income_stmt
+        try:
+            inc = ticker.income_stmt
+            if inc is not None and not inc.empty:
+                result["income_stmt"] = {
+                    "status": "OK",
+                    "rows": len(inc.index),
+                    "columns": len(inc.columns),
+                    "basic_eps": float(inc.loc["Basic EPS"].iloc[0]) if "Basic EPS" in inc.index else None
+                }
+            else:
+                result["income_stmt"] = {"status": "EMPTY"}
+        except Exception as e:
+            result["income_stmt"] = {"status": "ERROR", "error": str(e)}
+            result["errors"].append(f"income_stmt: {e}")
+
+        # Test info (simpler endpoint)
+        try:
+            info = ticker.info
+            if info:
+                result["info"] = {
+                    "status": "OK",
+                    "trailing_eps": info.get("trailingEps"),
+                    "shares_outstanding": info.get("sharesOutstanding"),
+                    "total_debt": info.get("totalDebt"),
+                }
+            else:
+                result["info"] = {"status": "EMPTY"}
+        except Exception as e:
+            result["info"] = {"status": "ERROR", "error": str(e)}
+            result["errors"].append(f"info: {e}")
+
+    except Exception as e:
+        result["errors"].append(f"ticker creation: {e}")
+
+    return result
+
+
 @router.get("/prices", response_model=List[USStockPrice])
 def get_all_us_prices(
     limit: int = Query(default=500, le=5000),
