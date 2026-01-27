@@ -110,6 +110,46 @@ class SeedRequest(BaseModel):
 # API Endpoints
 # ============================================================================
 
+@router.get("/debug/finnhub-raw/{symbol}")
+async def debug_finnhub_raw(symbol: str):
+    """Debug endpoint to see raw Finnhub SEC data and available GAAP concepts."""
+    from app.services.finnhub_service import FinnhubService
+    settings = get_settings()
+
+    async with FinnhubService(settings.finnhub_api_key) as service:
+        data = await service._request("stock/financials-reported", {
+            "symbol": symbol.upper(),
+            "freq": "annual"
+        })
+
+    reports = data.get("data", [])
+    if not reports:
+        return {"symbol": symbol, "error": "No SEC data found", "reports": 0}
+
+    # Get all unique GAAP concepts from the first report
+    concepts = set()
+    debt_concepts = []
+    first_report = reports[0] if reports else {}
+    report_data = first_report.get("report", {})
+
+    for section in ["bs", "ic", "cf"]:
+        section_data = report_data.get(section, [])
+        for item in section_data:
+            concept = item.get("concept", "")
+            concepts.add(concept)
+            if "debt" in concept.lower() or "borrow" in concept.lower() or "loan" in concept.lower():
+                debt_concepts.append({"concept": concept, "value": item.get("value")})
+
+    return {
+        "symbol": symbol,
+        "reports_count": len(reports),
+        "first_report_date": first_report.get("endDate"),
+        "debt_related_concepts": debt_concepts,
+        "all_concepts_count": len(concepts),
+        "sample_concepts": sorted(list(concepts))[:30]
+    }
+
+
 @router.get("/debug/yfinance/{symbol}")
 def debug_yfinance(symbol: str):
     """Debug endpoint to test yfinance on Railway."""

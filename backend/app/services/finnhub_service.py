@@ -536,10 +536,16 @@ GAAP_MAPPINGS = {
     "us-gaap_LiabilitiesCurrent": "current_liabilities",
     "us-gaap_LiabilitiesAndStockholdersEquity": "total_assets_check",
 
-    # Debt
+    # Debt - many variants used by different companies
     "us-gaap_LongTermDebt": "total_debt",
     "us-gaap_LongTermDebtNoncurrent": "total_debt",
     "us-gaap_DebtInstrumentCarryingAmount": "total_debt",
+    "us-gaap_ShortTermBorrowings": "short_term_debt",
+    "us-gaap_LongTermDebtAndCapitalLeaseObligations": "total_debt",
+    "us-gaap_DebtAndCapitalLeaseObligations": "total_debt",
+    "us-gaap_LongTermDebtAndFinanceLeaseObligations": "total_debt",
+    "us-gaap_FinanceLeaseLiabilityNoncurrent": "finance_lease_debt",
+    "us-gaap_OperatingLeaseLiabilityNoncurrent": "operating_lease_debt",
 
     # Cash Flow
     "us-gaap_NetCashProvidedByUsedInOperatingActivities": "operating_cash_flow",
