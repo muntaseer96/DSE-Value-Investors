@@ -263,9 +263,13 @@ def merge_financial_data(datasets: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     merged['source'] = 'simfin'
 
     # Filter out rows with no useful data
-    required_cols = ['revenue', 'net_income', 'eps', 'total_equity']
+    # Only check columns that actually exist in the merged dataframe
+    possible_required = ['revenue', 'net_income', 'eps', 'total_equity']
+    required_cols = [col for col in possible_required if col in merged.columns]
+
     merged = merged.dropna(subset=['symbol', 'year'])
-    merged = merged[merged[required_cols].notna().any(axis=1)]
+    if required_cols:
+        merged = merged[merged[required_cols].notna().any(axis=1)]
 
     logger.info(f"Merged dataset: {len(merged)} rows, {merged['symbol'].nunique()} unique stocks")
 
