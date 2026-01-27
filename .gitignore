@@ -50,3 +50,4 @@ batch_scrape_*.py
 test_scrape*.py
 execute_*.py
 futureplan.md
+CLAUDE.md
