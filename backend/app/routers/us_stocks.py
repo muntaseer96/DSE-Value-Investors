@@ -884,7 +884,7 @@ def stop_calculations():
 # Price Update Endpoints
 # ============================================================================
 
-async def _run_price_update(symbols: List[str], db_url: str):
+async def _run_price_update(symbols: List[str], db_url: str, api_key: str):
     """Background task to fetch prices for stocks."""
     global _price_progress
     from app.services.finnhub_service import FinnhubService
@@ -895,7 +895,7 @@ async def _run_price_update(symbols: List[str], db_url: str):
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
-    finnhub = FinnhubService()
+    finnhub = FinnhubService(api_key=api_key)
 
     try:
         _price_progress["total"] = len(symbols)
@@ -1004,12 +1004,14 @@ async def update_prices(
         "completed_at": None,
     }
 
-    # Get database URL for background task
+    # Get database URL and API key for background task
     from app.config import get_settings
-    db_url = get_settings().database_url
+    settings = get_settings()
+    db_url = settings.database_url
+    api_key = settings.finnhub_api_key
 
     # Use asyncio.create_task for async background task
-    asyncio.create_task(_run_price_update(symbols, db_url))
+    asyncio.create_task(_run_price_update(symbols, db_url, api_key))
 
     return {
         "status": "started",
