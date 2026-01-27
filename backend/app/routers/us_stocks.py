@@ -869,6 +869,22 @@ def _calculate_financial_ratios(record: USFinancialData):
         # Explicitly set to None for negative equity to avoid misleading values
         record.roe = None
 
+    # ROIC - Return on Invested Capital (works even with negative equity)
+    # ROIC = NOPAT / Invested Capital
+    # NOPAT = Operating Income * (1 - Tax Rate), estimate 25% tax rate
+    # Invested Capital = Total Equity + Total Debt
+    if record.operating_income and record.total_debt is not None:
+        # Calculate invested capital (equity can be negative, that's fine)
+        invested_capital = (record.total_equity or 0) + record.total_debt
+        if invested_capital > 0:
+            # Estimate NOPAT with 25% tax rate
+            nopat = record.operating_income * 0.75
+            record.roic = (nopat / invested_capital) * 100
+        else:
+            record.roic = None
+    else:
+        record.roic = None
+
     # ROA
     if record.net_income and record.total_assets and record.total_assets > 0:
         record.roa = (record.net_income / record.total_assets) * 100
@@ -959,6 +975,7 @@ def _calculate_us_valuations(db: Session, symbol: str):
             revenue_history = [f.get("revenue") for f in fin_data if f.get("revenue") is not None]
             net_income_history = [f.get("net_income") for f in fin_data if f.get("net_income") is not None]
             roe_history = [f.get("roe") for f in fin_data if f.get("roe") is not None]
+            roic_history = [f.get("roic") for f in fin_data if f.get("roic") is not None]
             gross_margin_history = [f.get("gross_margin") for f in fin_data if f.get("gross_margin") is not None]
             operating_margin_history = [f.get("operating_margin") for f in fin_data if f.get("operating_margin") is not None]
             debt_to_equity_history = [f.get("debt_to_equity") for f in fin_data if f.get("debt_to_equity") is not None]
@@ -972,6 +989,7 @@ def _calculate_us_valuations(db: Session, symbol: str):
                 roe_history=roe_history,
                 gross_margin_history=gross_margin_history,
                 operating_margin_history=operating_margin_history,
+                roic_history=roic_history,
                 debt_to_equity_history=debt_to_equity_history,
                 fcf_history=fcf_history,
                 current_price=stock.current_price or 0,
@@ -1296,6 +1314,7 @@ def get_us_four_ms(symbol: str, db: Session = Depends(get_db)):
     revenue_history = [f.revenue for f in financials]
     net_income_history = [f.net_income for f in financials]
     roe_history = [f.roe for f in financials]
+    roic_history = [f.roic for f in financials]
     gross_margin_history = [f.gross_margin for f in financials]
     operating_margin_history = [f.operating_margin for f in financials]
     de_history = [f.debt_to_equity for f in financials]
@@ -1337,6 +1356,7 @@ def get_us_four_ms(symbol: str, db: Session = Depends(get_db)):
         roe_history=roe_history,
         gross_margin_history=gross_margin_history,
         operating_margin_history=operating_margin_history,
+        roic_history=roic_history,
         debt_to_equity_history=de_history,
         fcf_history=fcf_history,
         current_price=current_price,
@@ -1381,6 +1401,7 @@ def get_us_full_analysis(symbol: str, db: Session = Depends(get_db)):
     revenue_history = [f.revenue for f in financials]
     net_income_history = [f.net_income for f in financials]
     roe_history = [f.roe for f in financials]
+    roic_history = [f.roic for f in financials]
     gross_margin_history = [f.gross_margin for f in financials]
     operating_margin_history = [f.operating_margin for f in financials]
     de_history = [f.debt_to_equity for f in financials]
@@ -1419,6 +1440,7 @@ def get_us_full_analysis(symbol: str, db: Session = Depends(get_db)):
         roe_history=roe_history,
         gross_margin_history=gross_margin_history,
         operating_margin_history=operating_margin_history,
+        roic_history=roic_history,
         debt_to_equity_history=de_history,
         fcf_history=fcf_history,
         current_price=current_price or 0,

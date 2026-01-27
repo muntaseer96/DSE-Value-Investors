@@ -388,18 +388,19 @@ class FourMsEvaluator:
         roe_history: List[float],
         gross_margin_history: List[float],
         operating_margin_history: List[float],
+        roic_history: List[float] = None,
     ) -> MoatScore:
         """Evaluate competitive moat - 100% objective.
 
         Scoring breakdown (100 points total):
-        - ROE Level (30): Average ROE scoring
-        - ROE Consistency (20): Consistent > 15%
+        - ROE/ROIC Level (30): Average return on capital
+        - ROE/ROIC Consistency (20): Consistent returns
         - Gross Margin Level (20): Pricing power indicator
         - Gross Margin Trend (15): Growing/stable/declining
         - Operating Margin (15): Operational efficiency
 
-        Note: ROE is set to None when equity is negative (aggressive stock buybacks).
-        In these cases, ROE scoring uses neutral values and adds explanatory notes.
+        Note: When ROE is unreliable (negative equity from buybacks), we use ROIC instead.
+        ROIC = NOPAT / Invested Capital, which works regardless of equity sign.
         """
         notes = []
         score_breakdown = {}
@@ -407,12 +408,37 @@ class FourMsEvaluator:
         # Filter valid ROE values (exclude None and extreme values from negative equity)
         # ROE > 100% or < -100% typically indicates near-zero or negative equity
         valid_roe = [r for r in roe_history if r is not None and -100 <= r <= 100]
-        has_negative_equity = len(valid_roe) < len([r for r in roe_history if r is not None]) or (
-            len(roe_history) > 0 and len(valid_roe) == 0
-        )
 
-        # 1. ROE Level (30 points)
-        if valid_roe:
+        # Filter valid ROIC values
+        valid_roic = [r for r in (roic_history or []) if r is not None and r > 0]
+
+        # Determine if we should use ROIC instead of ROE
+        # Use ROIC if: less than 3 valid ROE values but have ROIC data
+        use_roic = len(valid_roe) < 3 and len(valid_roic) >= 3
+        has_negative_equity = len(valid_roe) < len([r for r in roe_history if r is not None])
+
+        # 1. Return on Capital Level (30 points)
+        if use_roic and valid_roic:
+            # Use ROIC - thresholds are lower than ROE (ROIC typically 10-25% is good)
+            roic_avg = self._calculate_average(valid_roic)
+            roe_avg = roic_avg  # Store for return value
+            if roic_avg >= 20:
+                roe_level_score = 30
+                notes.append(f"Excellent ROIC of {roic_avg:.1f}% indicates strong moat")
+            elif roic_avg >= 15:
+                roe_level_score = 26
+                notes.append(f"Good ROIC of {roic_avg:.1f}% suggests competitive advantage")
+            elif roic_avg >= 12:
+                roe_level_score = 22
+                notes.append(f"Solid ROIC of {roic_avg:.1f}%")
+            elif roic_avg >= 8:
+                roe_level_score = 16
+                notes.append(f"Moderate ROIC of {roic_avg:.1f}%")
+            else:
+                roe_level_score = 10
+                notes.append(f"Below-average ROIC of {roic_avg:.1f}%")
+            notes.append("Using ROIC (negative equity makes ROE unreliable)")
+        elif valid_roe:
             roe_avg = self._calculate_average(valid_roe)
             if roe_avg >= 20:
                 roe_level_score = 30
@@ -430,14 +456,24 @@ class FourMsEvaluator:
                 roe_level_score = 6
                 notes.append(f"Weak ROE of {roe_avg:.1f}% - no evident moat")
         else:
-            # No valid ROE data - use neutral score
+            # No valid ROE or ROIC data - use neutral score
             roe_avg = 0.0
             roe_level_score = 15  # Neutral (middle of 0-30 range)
-            notes.append("ROE unavailable (negative equity from stock buybacks)")
+            notes.append("ROE/ROIC unavailable (insufficient data)")
         score_breakdown["ROE Level"] = roe_level_score
 
-        # 2. ROE Consistency (20 points)
-        if valid_roe and len(valid_roe) >= 2:
+        # 2. Return on Capital Consistency (20 points)
+        if use_roic and len(valid_roic) >= 2:
+            # Use ROIC for consistency check - threshold 12% (lower than ROE's 15%)
+            roe_consistent = self._is_consistent(valid_roic, 12.0)
+            if roe_consistent:
+                roe_consistency_score = 20
+                notes.append("Consistent ROIC > 12% shows durable advantage")
+            elif self._is_consistent(valid_roic, 8.0):
+                roe_consistency_score = 14
+            else:
+                roe_consistency_score = 8
+        elif valid_roe and len(valid_roe) >= 2:
             roe_consistent = self._is_consistent(valid_roe, 15.0)
             if roe_consistent:
                 roe_consistency_score = 20
@@ -447,11 +483,11 @@ class FourMsEvaluator:
             else:
                 roe_consistency_score = 6
         else:
-            # No valid ROE data for consistency check - use neutral score
+            # No valid data for consistency check - use neutral score
             roe_consistent = False
             roe_consistency_score = 10  # Neutral (middle of 0-20 range)
-            if has_negative_equity and not any("ROE unavailable" in n for n in notes):
-                notes.append("ROE consistency cannot be measured (negative equity)")
+            if has_negative_equity and not use_roic:
+                notes.append("Return consistency cannot be measured (insufficient data)")
         score_breakdown["ROE Consistency"] = roe_consistency_score
 
         # 3. Gross Margin Level (20 points)
@@ -520,16 +556,16 @@ class FourMsEvaluator:
         debt_to_equity_history: List[float],
         fcf_history: List[float],
         net_income_history: List[float],
+        roic_history: List[float] = None,
     ) -> ManagementScore:
         """Evaluate management quality - 100% objective.
 
         Scoring breakdown (100 points total):
-        - ROE Consistency (34): Good capital allocation
+        - ROE/ROIC Consistency (34): Good capital allocation
         - Debt Levels (33): Financial prudence
         - FCF/NI Ratio (33): Earnings quality
 
-        Note: ROE and D/E are set to None when equity is negative (aggressive buybacks).
-        In these cases, use neutral scores and add explanatory notes.
+        Note: When ROE is unreliable (negative equity from buybacks), we use ROIC instead.
         """
         notes = []
         score_breakdown = {}
@@ -537,8 +573,30 @@ class FourMsEvaluator:
         # Filter valid ROE values (exclude None and extreme values from negative equity)
         valid_roe = [r for r in roe_history if r is not None and -100 <= r <= 100]
 
-        # 1. ROE Consistency (34 points)
-        if valid_roe and len(valid_roe) >= 2:
+        # Filter valid ROIC values
+        valid_roic = [r for r in (roic_history or []) if r is not None and r > 0]
+
+        # Determine if we should use ROIC instead of ROE
+        use_roic = len(valid_roe) < 3 and len(valid_roic) >= 3
+
+        # 1. Return on Capital Consistency (34 points)
+        if use_roic and len(valid_roic) >= 2:
+            # Use ROIC - threshold 12% (lower than ROE's 15%)
+            roic_above_12 = self._is_consistent(valid_roic, 12.0)
+            roic_avg = self._calculate_average(valid_roic)
+
+            if roic_above_12:
+                roe_score = 34
+                notes.append("Consistent ROIC > 12% shows good capital allocation")
+            elif self._is_consistent(valid_roic, 8.0):
+                roe_score = 26
+            elif roic_avg >= 10:
+                roe_score = 20
+            else:
+                roe_score = 12
+            notes.append("Using ROIC (negative equity makes ROE unreliable)")
+            roe_above_15 = roic_above_12  # For return value
+        elif valid_roe and len(valid_roe) >= 2:
             roe_above_15 = self._is_consistent(valid_roe, 15.0)
             roe_avg = self._calculate_average(valid_roe)
 
@@ -552,10 +610,10 @@ class FourMsEvaluator:
             else:
                 roe_score = 8
         else:
-            # No valid ROE data - use neutral score
+            # No valid ROE or ROIC data - use neutral score
             roe_above_15 = False
             roe_score = 17  # Neutral (middle of 0-34 range)
-            notes.append("Capital allocation hard to measure (negative equity from buybacks)")
+            notes.append("Capital allocation hard to measure (insufficient return data)")
         score_breakdown["ROE Consistency"] = roe_score
 
         # Filter valid D/E values (None indicates negative equity)
@@ -692,6 +750,7 @@ class FourMsEvaluator:
         roe_history: List[float] = None,
         gross_margin_history: List[float] = None,
         operating_margin_history: List[float] = None,
+        roic_history: List[float] = None,  # ROIC fallback when ROE unreliable
         # Management data
         debt_to_equity_history: List[float] = None,
         fcf_history: List[float] = None,
@@ -719,6 +778,7 @@ class FourMsEvaluator:
         roe_history = roe_history or []
         gross_margin_history = gross_margin_history or []
         operating_margin_history = operating_margin_history or []
+        roic_history = roic_history or []
         debt_to_equity_history = debt_to_equity_history or []
         fcf_history = fcf_history or []
 
@@ -727,10 +787,10 @@ class FourMsEvaluator:
             symbol, revenue_history, net_income_history
         )
         moat = self.evaluate_moat(
-            roe_history, gross_margin_history, operating_margin_history
+            roe_history, gross_margin_history, operating_margin_history, roic_history
         )
         management = self.evaluate_management(
-            roe_history, debt_to_equity_history, fcf_history, net_income_history
+            roe_history, debt_to_equity_history, fcf_history, net_income_history, roic_history
         )
         mos = self.evaluate_mos(current_price, sticker_price)
 

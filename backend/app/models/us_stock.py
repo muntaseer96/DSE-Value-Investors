@@ -86,7 +86,8 @@ class USFinancialData(Base):
     free_cash_flow = Column(BigInteger)  # Operating CF - CapEx
 
     # Calculated Ratios
-    roe = Column(Float)  # Return on Equity (Net Income / Equity)
+    roe = Column(Float)  # Return on Equity (Net Income / Equity) - None if equity <= 0
+    roic = Column(Float)  # Return on Invested Capital (NOPAT / Invested Capital)
     roa = Column(Float)  # Return on Assets (Net Income / Assets)
     debt_to_equity = Column(Float)
     gross_margin = Column(Float)

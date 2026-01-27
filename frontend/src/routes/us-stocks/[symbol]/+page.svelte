@@ -242,6 +242,8 @@
                             <div class="metric-note">
                                 {#if metric.note}
                                     {metric.note}
+                                {:else if metric.name === 'Book Value' && (metric.status === 'INCONSISTENT' || metric.status === 'NEGATIVE')}
+                                    Negative book value (likely from stock buybacks, not losses)
                                 {:else}
                                     {metric.years} year{metric.years !== 1 ? 's' : ''} of data
                                 {/if}
