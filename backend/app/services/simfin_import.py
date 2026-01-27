@@ -137,11 +137,7 @@ def merge_financial_data(datasets: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     if 'Net Income' in income.columns:
         income_cols['net_income'] = income['Net Income']
 
-    # EPS - prefer diluted
-    if 'Earnings Per Share, Diluted' in income.columns:
-        income_cols['eps'] = income['Earnings Per Share, Diluted']
-    elif 'Earnings Per Share, Basic' in income.columns:
-        income_cols['eps'] = income['Earnings Per Share, Basic']
+    # Note: EPS comes from the derived dataset, not income statement (for SimFin free tier)
 
     # Select columns from Balance Sheet
     balance_cols = balance[['symbol', 'year']].copy()
@@ -208,6 +204,12 @@ def merge_financial_data(datasets: Dict[str, pd.DataFrame]) -> pd.DataFrame:
             derived_cols['roa'] = derived['Return on Assets'] * 100
         if 'Return on Invested Capital' in derived.columns:
             derived_cols['roic'] = derived['Return on Invested Capital'] * 100
+
+        # EPS from derived dataset (not in income statement for free tier)
+        if 'Earnings Per Share, Diluted' in derived.columns:
+            derived_cols['eps'] = derived['Earnings Per Share, Diluted']
+        elif 'Earnings Per Share, Basic' in derived.columns:
+            derived_cols['eps'] = derived['Earnings Per Share, Basic']
 
         merged = merged.merge(derived_cols, on=['symbol', 'year'], how='left')
 
