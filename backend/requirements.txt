@@ -20,8 +20,9 @@ openpyxl
 # HTTP client
 httpx
 
-# US stock data (for stock splits)
+# US stock data
 yfinance
+simfin
 
 # Environment variables
 python-dotenv
