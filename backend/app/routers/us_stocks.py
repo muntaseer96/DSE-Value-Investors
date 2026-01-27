@@ -1334,6 +1334,8 @@ def get_us_four_ms(symbol: str, db: Session = Depends(get_db)):
     de_history = [f.debt_to_equity for f in financials]
     fcf_history = [f.free_cash_flow for f in financials]
     eps_history = [f.eps for f in financials]
+    equity_history = [f.total_equity for f in financials]
+    ocf_history = [f.operating_cash_flow for f in financials]
 
     current_price = stock.current_price or 0
 
@@ -1355,8 +1357,8 @@ def get_us_four_ms(symbol: str, db: Session = Depends(get_db)):
     big_five_result = big_five_calc.calculate(
         revenue_history=revenue_history,
         eps_history=eps_history,
-        equity_history=[f.total_equity for f in financials],
-        operating_cf_history=[f.operating_cash_flow for f in financials],
+        equity_history=equity_history,
+        operating_cf_history=ocf_history,
         free_cf_history=fcf_history,
         years_list=years_list,
     )
@@ -1373,6 +1375,7 @@ def get_us_four_ms(symbol: str, db: Session = Depends(get_db)):
         roic_history=roic_history,
         debt_to_equity_history=de_history,
         fcf_history=fcf_history,
+        equity_history=equity_history,
         current_price=current_price,
         sticker_price=sticker_price,
         big_five_score=big_five_result.score,
@@ -1457,6 +1460,7 @@ def get_us_full_analysis(symbol: str, db: Session = Depends(get_db)):
         roic_history=roic_history,
         debt_to_equity_history=de_history,
         fcf_history=fcf_history,
+        equity_history=equity_history,
         current_price=current_price or 0,
         sticker_price=sticker_result.sticker_price if sticker_result and sticker_result.status == "CALCULABLE" else 0,
         big_five_score=big_five_result.score,

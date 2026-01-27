@@ -563,6 +563,7 @@ class FourMsEvaluator:
         fcf_history: List[float],
         net_income_history: List[float],
         roic_history: List[float] = None,
+        equity_history: List[float] = None,
     ) -> ManagementScore:
         """Evaluate management quality - 100% objective.
 
@@ -628,8 +629,12 @@ class FourMsEvaluator:
             notes.append("Capital allocation hard to measure (insufficient return data)")
         score_breakdown["ROE Consistency"] = roe_score
 
-        # Filter valid D/E values (None indicates negative equity)
+        # Filter valid D/E values
         valid_de = [d for d in debt_to_equity_history if d is not None]
+
+        # Check if equity is positive (to distinguish missing debt vs negative equity)
+        valid_equity = [e for e in (equity_history or []) if e is not None]
+        has_positive_equity = any(e > 0 for e in valid_equity) if valid_equity else True
 
         # 2. Debt Levels (33 points)
         if valid_de:
@@ -651,6 +656,12 @@ class FourMsEvaluator:
             else:
                 debt_score = 5
                 notes.append("High debt is a concern")
+        elif has_positive_equity:
+            # Positive equity but no D/E data - debt data is missing from source
+            de_avg = 0
+            debt_reasonable = True  # Can't determine
+            debt_score = 17  # Neutral score
+            notes.append("Debt data unavailable")
         else:
             # No valid D/E data - negative equity from buybacks
             de_avg = 0
@@ -766,6 +777,7 @@ class FourMsEvaluator:
         # Management data
         debt_to_equity_history: List[float] = None,
         fcf_history: List[float] = None,
+        equity_history: List[float] = None,  # To distinguish missing debt vs negative equity
         # Margin of Safety
         current_price: float = 0,
         sticker_price: float = 0,
@@ -793,6 +805,7 @@ class FourMsEvaluator:
         roic_history = roic_history or []
         debt_to_equity_history = debt_to_equity_history or []
         fcf_history = fcf_history or []
+        equity_history = equity_history or []
 
         # Evaluate each M
         meaning = self.evaluate_meaning(
@@ -802,7 +815,7 @@ class FourMsEvaluator:
             roe_history, gross_margin_history, operating_margin_history, roic_history
         )
         management = self.evaluate_management(
-            roe_history, debt_to_equity_history, fcf_history, net_income_history, roic_history
+            roe_history, debt_to_equity_history, fcf_history, net_income_history, roic_history, equity_history
         )
         mos = self.evaluate_mos(current_price, sticker_price)
 
