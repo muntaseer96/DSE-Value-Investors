@@ -14,6 +14,25 @@ FINNHUB_EPS_PROBLEM_SYMBOLS = {
     "V",  # Visa - Finnhub reports EPS with wrong share count (6-8x too high)
 }
 
+# Hardcoded EPS values for problem stocks (fallback when yfinance fails on Railway)
+# Source: Yahoo Finance income statement (Basic EPS)
+HARDCODED_EPS_OVERRIDES = {
+    "V": {
+        2025: 10.22,
+        2024: 9.74,
+        2023: 8.29,
+        2022: 7.01,
+        2021: 5.63,
+        2020: 4.89,
+        2019: 5.32,
+        2018: 4.42,
+        2017: 2.80,
+        2016: 2.84,
+        2015: 2.62,
+        2014: 2.16,
+    },
+}
+
 
 def get_stock_splits(symbol: str) -> List[Dict]:
     """
@@ -592,16 +611,24 @@ class FinnhubService:
                         financials_by_year[year]["current_liabilities"] = yf_cl[year]
                         logger.debug(f"{symbol} {year}: current_liabilities filled from yfinance: {yf_cl[year]}")
 
-        # For symbols with known Finnhub EPS data quality issues, override with yfinance EPS
+        # For symbols with known Finnhub EPS data quality issues, override with correct EPS
         if symbol in FINNHUB_EPS_PROBLEM_SYMBOLS:
-            logger.info(f"{symbol} is in FINNHUB_EPS_PROBLEM_SYMBOLS - using yfinance EPS instead")
+            logger.info(f"{symbol} is in FINNHUB_EPS_PROBLEM_SYMBOLS - overriding EPS")
+
+            # Try yfinance first
             yf_eps = _get_yfinance_eps(symbol)
+
+            # Fallback to hardcoded values if yfinance fails (common on Railway due to rate limits)
+            if not yf_eps and symbol in HARDCODED_EPS_OVERRIDES:
+                logger.info(f"{symbol}: yfinance failed, using hardcoded EPS values")
+                yf_eps = HARDCODED_EPS_OVERRIDES[symbol]
+
             if yf_eps:
                 for year, eps_value in yf_eps.items():
                     if year in financials_by_year:
                         old_eps = financials_by_year[year].get("eps")
                         financials_by_year[year]["eps"] = eps_value
-                        logger.info(f"{symbol} {year}: EPS overridden from {old_eps} to {eps_value} (yfinance)")
+                        logger.info(f"{symbol} {year}: EPS overridden from {old_eps} to {eps_value}")
 
         return financials_by_year
 
