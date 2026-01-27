@@ -8,6 +8,12 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Symbols with known Finnhub EPS data quality issues
+# These stocks will use yfinance EPS instead of Finnhub
+FINNHUB_EPS_PROBLEM_SYMBOLS = {
+    "V",  # Visa - Finnhub reports EPS with wrong share count (6-8x too high)
+}
+
 
 def get_stock_splits(symbol: str) -> List[Dict]:
     """
@@ -223,6 +229,50 @@ def _get_yfinance_current_liabilities(symbol: str) -> Optional[Dict[int, float]]
 
     except Exception as e:
         logger.warning(f"yfinance current_liabilities fallback failed for {symbol}: {e}")
+        return None
+
+
+def _get_yfinance_eps(symbol: str) -> Optional[Dict[int, float]]:
+    """
+    Get EPS by year from yfinance. Used for stocks with known Finnhub data issues.
+
+    Args:
+        symbol: Stock symbol
+
+    Returns:
+        Dict mapping year to EPS, or None if failed
+    """
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        income = ticker.income_stmt
+
+        if income is None or income.empty:
+            return None
+
+        # Look for Basic EPS (preferred) or Diluted EPS
+        eps_key = None
+        if "Basic EPS" in income.index:
+            eps_key = "Basic EPS"
+        elif "Diluted EPS" in income.index:
+            eps_key = "Diluted EPS"
+        else:
+            return None
+
+        eps_series = income.loc[eps_key]
+        result = {}
+
+        for date, value in eps_series.items():
+            if value is not None and not (hasattr(value, '__float__') and value != value):  # Check for NaN
+                year = date.year
+                result[year] = float(value)
+
+        if result:
+            logger.info(f"yfinance EPS for {symbol}: found {len(result)} years - {result}")
+        return result if result else None
+
+    except Exception as e:
+        logger.warning(f"yfinance EPS failed for {symbol}: {e}")
         return None
 
 
@@ -541,6 +591,17 @@ class FinnhubService:
                     if year in yf_cl:
                         financials_by_year[year]["current_liabilities"] = yf_cl[year]
                         logger.debug(f"{symbol} {year}: current_liabilities filled from yfinance: {yf_cl[year]}")
+
+        # For symbols with known Finnhub EPS data quality issues, override with yfinance EPS
+        if symbol in FINNHUB_EPS_PROBLEM_SYMBOLS:
+            logger.info(f"{symbol} is in FINNHUB_EPS_PROBLEM_SYMBOLS - using yfinance EPS instead")
+            yf_eps = _get_yfinance_eps(symbol)
+            if yf_eps:
+                for year, eps_value in yf_eps.items():
+                    if year in financials_by_year:
+                        old_eps = financials_by_year[year].get("eps")
+                        financials_by_year[year]["eps"] = eps_value
+                        logger.info(f"{symbol} {year}: EPS overridden from {old_eps} to {eps_value} (yfinance)")
 
         return financials_by_year
 

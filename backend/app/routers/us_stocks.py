@@ -846,8 +846,12 @@ def _save_us_stock_data(db: Session, symbol: str, data: Dict):
                 if field in fin_data:
                     value = fin_data[field]
                     # Apply stock split adjustment to EPS
+                    # Skip for stocks in FINNHUB_EPS_PROBLEM_SYMBOLS - their EPS comes
+                    # from yfinance which is already split-adjusted
                     if field == "eps" and value is not None:
-                        value = adjust_eps_for_splits(symbol, year, value)
+                        from app.services.finnhub_service import FINNHUB_EPS_PROBLEM_SYMBOLS
+                        if symbol not in FINNHUB_EPS_PROBLEM_SYMBOLS:
+                            value = adjust_eps_for_splits(symbol, year, value)
                     setattr(existing, field, value)
 
             # Calculate derived metrics
