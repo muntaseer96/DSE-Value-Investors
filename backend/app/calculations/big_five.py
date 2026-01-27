@@ -81,11 +81,14 @@ class BigFiveCalculator:
     MIN_YEARS = 3
     IDEAL_YEARS = 5
 
-    def calculate_cagr(self, values: List[float]) -> float:
+    def calculate_cagr(self, values: List[float], years_list: List[int] = None) -> float:
         """Calculate Compound Annual Growth Rate.
 
         Args:
             values: List of values in chronological order (oldest first)
+            years_list: Optional list of actual years corresponding to values.
+                       If provided, uses actual year span instead of array indices.
+                       This fixes CAGR inflation when negative years are filtered out.
 
         Returns:
             CAGR as decimal (e.g., 0.12 for 12%)
@@ -94,21 +97,31 @@ class BigFiveCalculator:
             return 0.0
 
         # Filter out zeros and negatives for CAGR calculation
-        # But keep position information
-        valid_indices = [(i, v) for i, v in enumerate(values) if v and v > 0]
+        # Keep position information and optionally the actual year
+        if years_list and len(years_list) == len(values):
+            # Store (index, value, year) tuples
+            valid_data = [(i, v, years_list[i]) for i, v in enumerate(values) if v and v > 0]
+        else:
+            # Fallback: store (index, value, None) tuples
+            valid_data = [(i, v, None) for i, v in enumerate(values) if v and v > 0]
 
-        if len(valid_indices) < 2:
+        if len(valid_data) < 2:
             return 0.0
 
-        first_idx, start_value = valid_indices[0]
-        last_idx, end_value = valid_indices[-1]
-        years = last_idx - first_idx
+        first_idx, start_value, first_year = valid_data[0]
+        last_idx, end_value, last_year = valid_data[-1]
 
-        if years <= 0 or start_value <= 0:
+        # Calculate year span - prefer actual years over indices
+        if first_year is not None and last_year is not None:
+            year_span = last_year - first_year
+        else:
+            year_span = last_idx - first_idx
+
+        if year_span <= 0 or start_value <= 0:
             return 0.0
 
         try:
-            cagr = (end_value / start_value) ** (1 / years) - 1
+            cagr = (end_value / start_value) ** (1 / year_span) - 1
             return cagr
         except (ValueError, ZeroDivisionError):
             return 0.0
@@ -135,12 +148,14 @@ class BigFiveCalculator:
         else:
             return {"pattern": "normal", "positive": positive, "negative": negative, "zero_null": zero_null}
 
-    def _evaluate_growth(self, name: str, values: List[float]) -> GrowthMetric:
+    def _evaluate_growth(self, name: str, values: List[float], years_list: List[int] = None) -> GrowthMetric:
         """Evaluate a single growth metric.
 
         Args:
             name: Metric name (e.g., "Revenue")
             values: Historical values, oldest first
+            years_list: Optional list of actual years corresponding to values.
+                       Passed to calculate_cagr for accurate year span calculation.
 
         Returns:
             GrowthMetric result
@@ -177,7 +192,7 @@ class BigFiveCalculator:
 
         if analysis["pattern"] == "inconsistent":
             # Still calculate CAGR for positive values, but flag as inconsistent
-            cagr = self.calculate_cagr(values)
+            cagr = self.calculate_cagr(values, years_list)
             cagr_pct = cagr * 100
             return GrowthMetric(
                 name=name,
@@ -191,7 +206,7 @@ class BigFiveCalculator:
             )
 
         # Normal case - calculate CAGR
-        cagr = self.calculate_cagr(values)
+        cagr = self.calculate_cagr(values, years_list)
         cagr_pct = cagr * 100
 
         # Determine status
@@ -225,6 +240,7 @@ class BigFiveCalculator:
         equity_history: List[float],
         operating_cf_history: List[float],
         free_cf_history: List[float],
+        years_list: List[int] = None,
     ) -> BigFiveResult:
         """Calculate all Big Five metrics.
 
@@ -236,16 +252,18 @@ class BigFiveCalculator:
             equity_history: Annual book value/equity values
             operating_cf_history: Annual operating cash flow values
             free_cf_history: Annual free cash flow values
+            years_list: Optional list of actual years corresponding to the data.
+                       Used for accurate CAGR calculation when values have gaps.
 
         Returns:
             BigFiveResult with all metrics and overall score
         """
         # Calculate each metric
-        revenue = self._evaluate_growth("Revenue", revenue_history)
-        eps = self._evaluate_growth("EPS", eps_history)
-        equity = self._evaluate_growth("Book Value", equity_history)
-        operating_cf = self._evaluate_growth("Operating Cash Flow", operating_cf_history)
-        free_cf = self._evaluate_growth("Free Cash Flow", free_cf_history)
+        revenue = self._evaluate_growth("Revenue", revenue_history, years_list)
+        eps = self._evaluate_growth("EPS", eps_history, years_list)
+        equity = self._evaluate_growth("Book Value", equity_history, years_list)
+        operating_cf = self._evaluate_growth("Operating Cash Flow", operating_cf_history, years_list)
+        free_cf = self._evaluate_growth("Free Cash Flow", free_cf_history, years_list)
 
         # Calculate overall score
         metrics = [revenue, eps, equity, operating_cf, free_cf]
@@ -296,6 +314,9 @@ class BigFiveCalculator:
         # Sort by year (oldest first)
         sorted_data = sorted(financials, key=lambda x: x.get("year", 0))
 
+        # Extract years list for accurate CAGR calculation
+        years_list = [f.get("year") for f in sorted_data]
+
         # Extract each metric series
         revenue_history = [f.get("revenue") for f in sorted_data]
         eps_history = [f.get("eps") for f in sorted_data]
@@ -309,4 +330,5 @@ class BigFiveCalculator:
             equity_history=equity_history,
             operating_cf_history=operating_cf_history,
             free_cf_history=free_cf_history,
+            years_list=years_list,
         )

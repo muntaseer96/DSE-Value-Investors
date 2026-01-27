@@ -40,7 +40,7 @@
 |-----------|--------|-------|
 | **Quotes** | Finnhub API | Primary source. Falls back to `yfinance` if Finnhub returns no data |
 | **Fundamentals** | Finnhub API | SEC-reported financials (10-K filings) |
-| **Stock Splits** | `yfinance` | Auto-adjusts historical EPS for splits |
+| **Stock Splits** | `yfinance` | Auto-detects and adjusts EPS for splits (2014+ only, older already in SEC data) |
 
 **API Keys Required:**
 - `FINNHUB_API_KEY` - For US stock data (60 calls/min rate limit)
@@ -237,6 +237,37 @@ Project ID: `kjjringoshpczqttxaib`
 ---
 
 ## Recent Changes
+
+### 2026-01-27 (Update 2)
+- **Fixed ORLY valuation bugs** - Three critical fixes for US stock calculations:
+  1. **Replaced hardcoded stock splits with yfinance API** in `stock_splits.py`
+     - Now uses yfinance as source of truth for split detection
+     - Automatically detects ALL stock splits (no manual dictionary updates needed)
+     - Only considers splits from 2014+ (older splits already reflected in SEC data)
+     - Keeps hardcoded `FALLBACK_SPLITS` dictionary as backup if yfinance fails
+     - Cache prevents repeated API calls for same symbol
+  2. **Fixed CAGR year calculation** in `big_five.py`
+     - Now uses actual calendar years instead of array indices
+     - Prevents inflated growth rates when negative years are filtered out
+     - Example: 100→200 over 10 years now correctly shows 7.2% CAGR, not 18.9%
+  3. **Handle negative equity in ROE** in `us_stocks.py` and `four_ms.py`
+     - ROE set to None when equity is negative (aggressive buybacks)
+     - Moat/Management scores use neutral values instead of misleading high ROE
+     - Added explanatory notes: "ROE unavailable (negative equity from stock buybacks)"
+- **Affected stocks**: ORLY, AZO, NVR, and any other high-buyback companies with negative equity
+- **Action required**: Re-scrape affected stocks with `POST /us-stocks/trigger-scrape?symbol=ORLY`
+
+### 2026-01-27
+- **Disabled Railway scheduler** - Now using GitHub Actions only for US stock scraping
+  - Railway's internal scheduler was running in parallel, wasting API calls on non-Common Stock types
+  - GitHub Action (every 3 hours) properly filters for Common Stock via `/trigger-scrape` endpoint
+- **Filtered US stocks to Common Stock only** in all API endpoints:
+  - `/us-stocks/prices`, `/us-stocks/count`, `/us-stocks/filter-counts`, `/us-stocks/sectors`
+  - Excludes ETFs, REITs, ADRs, and other non-operating securities from Phil Town valuations
+  - Table now shows 18,320 stocks instead of 29,317
+- **Removed "X attempted" indicator** from US stocks page (no longer needed since all Common Stocks scraped)
+- **Investigated GitHub Actions schedule** - found 00:00 UTC runs can be delayed 1+ hours during high traffic
+- **Scraper cycling confirmed working** - re-scrapes from oldest `last_fundamental_update` after completing all Common Stocks
 
 ### 2026-01-22
 - Fixed DSE prices to show YCP when LTP=0 (market closed)

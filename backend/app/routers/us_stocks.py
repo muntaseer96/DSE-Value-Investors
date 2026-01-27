@@ -861,17 +861,24 @@ def _calculate_financial_ratios(record: USFinancialData):
     if record.operating_cash_flow and record.capital_expenditure:
         record.free_cash_flow = record.operating_cash_flow - abs(record.capital_expenditure)
 
-    # ROE
+    # ROE - Only calculate if equity is positive
+    # Negative equity (from aggressive buybacks) makes ROE meaningless
     if record.net_income and record.total_equity and record.total_equity > 0:
         record.roe = (record.net_income / record.total_equity) * 100
+    else:
+        # Explicitly set to None for negative equity to avoid misleading values
+        record.roe = None
 
     # ROA
     if record.net_income and record.total_assets and record.total_assets > 0:
         record.roa = (record.net_income / record.total_assets) * 100
 
-    # Debt to Equity
+    # Debt to Equity - Only meaningful with positive equity
     if record.total_debt is not None and record.total_equity and record.total_equity > 0:
         record.debt_to_equity = record.total_debt / record.total_equity
+    else:
+        # Negative equity makes D/E ratio meaningless
+        record.debt_to_equity = None
 
     # Margins
     if record.revenue and record.revenue > 0:

@@ -1,57 +1,36 @@
 """
 Stock split adjustment service.
 
-Automatically detects and fixes EPS values that weren't adjusted for stock splits.
-Uses yfinance to get split history and applies corrections to the database.
+Scans all stocks in the database and fixes EPS values that weren't
+adjusted for stock splits. Uses the centralized stock_splits module
+for split detection (yfinance with 2014+ cutoff).
+
+This service is called by the /fix-splits endpoint for bulk corrections.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
-
-# Cache for split data to avoid repeated API calls
-_splits_cache: Dict[str, List[Dict]] = {}
 
 
 def get_stock_splits(symbol: str, use_cache: bool = True) -> List[Dict]:
     """
-    Fetch stock split history from yfinance.
+    Fetch stock split history using the centralized stock_splits module.
 
     Args:
         symbol: Stock symbol (e.g., "AAPL")
-        use_cache: Whether to use cached data
+        use_cache: Whether to use cached data (always True, cache is in stock_splits)
 
     Returns:
-        List of splits with date, year, and ratio
+        List of splits with year and ratio (2014+ only)
     """
-    if use_cache and symbol in _splits_cache:
-        return _splits_cache[symbol]
+    from app.stock_data.stock_splits import get_splits_for_symbol
 
-    try:
-        import yfinance as yf
-        ticker = yf.Ticker(symbol)
-        splits = ticker.splits
+    splits = get_splits_for_symbol(symbol)
 
-        if splits is None or len(splits) == 0:
-            _splits_cache[symbol] = []
-            return []
-
-        result = []
-        for date, ratio in splits.items():
-            if ratio > 1:  # Only meaningful splits
-                result.append({
-                    "date": date.strftime("%Y-%m-%d"),
-                    "year": date.year,
-                    "ratio": float(ratio)
-                })
-
-        _splits_cache[symbol] = result
-        return result
-    except Exception as e:
-        logger.warning(f"Failed to fetch splits for {symbol}: {e}")
-        return []
+    # Convert to dict format for backward compatibility with this service
+    return [{"year": year, "ratio": ratio} for year, ratio in splits]
 
 
 def calculate_split_factor(splits: List[Dict], for_year: int) -> float:
@@ -189,6 +168,6 @@ def apply_split_adjustments(db, dry_run: bool = True) -> Dict:
 
 
 def clear_cache():
-    """Clear the splits cache."""
-    global _splits_cache
-    _splits_cache = {}
+    """Clear the splits cache (delegates to stock_splits module)."""
+    from app.stock_data.stock_splits import clear_cache as clear_stock_splits_cache
+    clear_stock_splits_cache()

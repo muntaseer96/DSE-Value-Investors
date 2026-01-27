@@ -397,38 +397,61 @@ class FourMsEvaluator:
         - Gross Margin Level (20): Pricing power indicator
         - Gross Margin Trend (15): Growing/stable/declining
         - Operating Margin (15): Operational efficiency
+
+        Note: ROE is set to None when equity is negative (aggressive stock buybacks).
+        In these cases, ROE scoring uses neutral values and adds explanatory notes.
         """
         notes = []
         score_breakdown = {}
 
+        # Filter valid ROE values (exclude None and extreme values from negative equity)
+        # ROE > 100% or < -100% typically indicates near-zero or negative equity
+        valid_roe = [r for r in roe_history if r is not None and -100 <= r <= 100]
+        has_negative_equity = len(valid_roe) < len([r for r in roe_history if r is not None]) or (
+            len(roe_history) > 0 and len(valid_roe) == 0
+        )
+
         # 1. ROE Level (30 points)
-        roe_avg = self._calculate_average(roe_history)
-        if roe_avg >= 20:
-            roe_level_score = 30
-            notes.append(f"Excellent ROE of {roe_avg:.1f}% indicates strong moat")
-        elif roe_avg >= 15:
-            roe_level_score = 24
-            notes.append(f"Good ROE of {roe_avg:.1f}% suggests competitive advantage")
-        elif roe_avg >= 10:
-            roe_level_score = 18
-            notes.append(f"Moderate ROE of {roe_avg:.1f}%")
-        elif roe_avg >= 5:
-            roe_level_score = 12
-            notes.append(f"Below-average ROE of {roe_avg:.1f}%")
+        if valid_roe:
+            roe_avg = self._calculate_average(valid_roe)
+            if roe_avg >= 20:
+                roe_level_score = 30
+                notes.append(f"Excellent ROE of {roe_avg:.1f}% indicates strong moat")
+            elif roe_avg >= 15:
+                roe_level_score = 24
+                notes.append(f"Good ROE of {roe_avg:.1f}% suggests competitive advantage")
+            elif roe_avg >= 10:
+                roe_level_score = 18
+                notes.append(f"Moderate ROE of {roe_avg:.1f}%")
+            elif roe_avg >= 5:
+                roe_level_score = 12
+                notes.append(f"Below-average ROE of {roe_avg:.1f}%")
+            else:
+                roe_level_score = 6
+                notes.append(f"Weak ROE of {roe_avg:.1f}% - no evident moat")
         else:
-            roe_level_score = 6
-            notes.append(f"Weak ROE of {roe_avg:.1f}% - no evident moat")
+            # No valid ROE data - use neutral score
+            roe_avg = 0.0
+            roe_level_score = 15  # Neutral (middle of 0-30 range)
+            notes.append("ROE unavailable (negative equity from stock buybacks)")
         score_breakdown["ROE Level"] = roe_level_score
 
         # 2. ROE Consistency (20 points)
-        roe_consistent = self._is_consistent(roe_history, 15.0)
-        if roe_consistent:
-            roe_consistency_score = 20
-            notes.append("Consistent ROE > 15% shows durable advantage")
-        elif self._is_consistent(roe_history, 10.0):
-            roe_consistency_score = 12
+        if valid_roe and len(valid_roe) >= 2:
+            roe_consistent = self._is_consistent(valid_roe, 15.0)
+            if roe_consistent:
+                roe_consistency_score = 20
+                notes.append("Consistent ROE > 15% shows durable advantage")
+            elif self._is_consistent(valid_roe, 10.0):
+                roe_consistency_score = 12
+            else:
+                roe_consistency_score = 6
         else:
-            roe_consistency_score = 6
+            # No valid ROE data for consistency check - use neutral score
+            roe_consistent = False
+            roe_consistency_score = 10  # Neutral (middle of 0-20 range)
+            if has_negative_equity and not any("ROE unavailable" in n for n in notes):
+                notes.append("ROE consistency cannot be measured (negative equity)")
         score_breakdown["ROE Consistency"] = roe_consistency_score
 
         # 3. Gross Margin Level (20 points)
@@ -504,44 +527,66 @@ class FourMsEvaluator:
         - ROE Consistency (34): Good capital allocation
         - Debt Levels (33): Financial prudence
         - FCF/NI Ratio (33): Earnings quality
+
+        Note: ROE and D/E are set to None when equity is negative (aggressive buybacks).
+        In these cases, use neutral scores and add explanatory notes.
         """
         notes = []
         score_breakdown = {}
 
-        # 1. ROE Consistency (34 points)
-        roe_above_15 = self._is_consistent(roe_history, 15.0)
-        roe_avg = self._calculate_average(roe_history)
+        # Filter valid ROE values (exclude None and extreme values from negative equity)
+        valid_roe = [r for r in roe_history if r is not None and -100 <= r <= 100]
 
-        if roe_above_15:
-            roe_score = 34
-            notes.append("Consistent ROE > 15% shows good capital allocation")
-        elif self._is_consistent(roe_history, 10.0):
-            roe_score = 24
-        elif roe_avg >= 10:
-            roe_score = 16
+        # 1. ROE Consistency (34 points)
+        if valid_roe and len(valid_roe) >= 2:
+            roe_above_15 = self._is_consistent(valid_roe, 15.0)
+            roe_avg = self._calculate_average(valid_roe)
+
+            if roe_above_15:
+                roe_score = 34
+                notes.append("Consistent ROE > 15% shows good capital allocation")
+            elif self._is_consistent(valid_roe, 10.0):
+                roe_score = 24
+            elif roe_avg >= 10:
+                roe_score = 16
+            else:
+                roe_score = 8
         else:
-            roe_score = 8
+            # No valid ROE data - use neutral score
+            roe_above_15 = False
+            roe_score = 17  # Neutral (middle of 0-34 range)
+            notes.append("Capital allocation hard to measure (negative equity from buybacks)")
         score_breakdown["ROE Consistency"] = roe_score
 
-        # 2. Debt Levels (33 points)
-        de_avg = self._calculate_average(debt_to_equity_history)
-        debt_reasonable = de_avg < 0.5 if de_avg else True
+        # Filter valid D/E values (None indicates negative equity)
+        valid_de = [d for d in debt_to_equity_history if d is not None]
 
-        if de_avg < 0.3:
-            debt_score = 33
-            notes.append("Very low debt provides financial flexibility")
-        elif de_avg < 0.5:
-            debt_score = 26
-            notes.append("Conservative debt levels")
-        elif de_avg < 1.0:
-            debt_score = 18
-            notes.append("Moderate debt - monitor carefully")
-        elif de_avg < 2.0:
-            debt_score = 10
-            notes.append("Elevated debt levels")
+        # 2. Debt Levels (33 points)
+        if valid_de:
+            de_avg = self._calculate_average(valid_de)
+            debt_reasonable = de_avg < 0.5
+
+            if de_avg < 0.3:
+                debt_score = 33
+                notes.append("Very low debt provides financial flexibility")
+            elif de_avg < 0.5:
+                debt_score = 26
+                notes.append("Conservative debt levels")
+            elif de_avg < 1.0:
+                debt_score = 18
+                notes.append("Moderate debt - monitor carefully")
+            elif de_avg < 2.0:
+                debt_score = 10
+                notes.append("Elevated debt levels")
+            else:
+                debt_score = 5
+                notes.append("High debt is a concern")
         else:
-            debt_score = 5
-            notes.append("High debt is a concern")
+            # No valid D/E data - negative equity from buybacks
+            de_avg = 0
+            debt_reasonable = True  # Can't determine, assume reasonable
+            debt_score = 20  # Neutral-positive (companies with negative equity often have low actual debt)
+            notes.append("Debt/equity ratio N/A (negative equity)")
         score_breakdown["Debt Management"] = debt_score
 
         # 3. FCF/Net Income Ratio (33 points) - Earnings quality
