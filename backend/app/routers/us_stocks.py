@@ -81,6 +81,7 @@ class USFinancialRecord(BaseModel):
     capital_expenditure: Optional[int] = None
     free_cash_flow: Optional[int] = None
     roe: Optional[float] = None
+    roic: Optional[float] = None
     roa: Optional[float] = None
     debt_to_equity: Optional[float] = None
     gross_margin: Optional[float] = None
@@ -355,6 +356,7 @@ def get_us_stock_fundamentals(symbol: str, db: Session = Depends(get_db)):
                 capital_expenditure=f.capital_expenditure,
                 free_cash_flow=f.free_cash_flow,
                 roe=f.roe,
+                roic=f.roic,
                 roa=f.roa,
                 debt_to_equity=f.debt_to_equity,
                 gross_margin=f.gross_margin,
