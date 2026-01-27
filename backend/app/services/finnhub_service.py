@@ -316,6 +316,166 @@ def _get_yfinance_eps(symbol: str) -> Optional[Dict[int, float]]:
         return None
 
 
+async def _get_finnhub_earnings_eps(symbol: str, api_key: str) -> Optional[Dict[int, float]]:
+    """
+    Get EPS directly from Finnhub's /stock/earnings endpoint.
+
+    This endpoint returns actual reported EPS from earnings releases,
+    NOT derived from SEC filings (which has bugs for some stocks).
+
+    Args:
+        symbol: Stock symbol
+        api_key: Finnhub API key
+
+    Returns:
+        Dict mapping fiscal year to annual EPS, or None if failed
+    """
+    try:
+        import httpx
+
+        url = f"https://finnhub.io/api/v1/stock/earnings"
+        params = {"symbol": symbol, "token": api_key}
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url, params=params)
+            data = response.json()
+
+        if not data or not isinstance(data, list):
+            logger.warning(f"{symbol}: Finnhub earnings returned no data")
+            return None
+
+        # data is a list of quarterly earnings - we need to aggregate to annual
+        # Each item has: actual, estimate, period, surprise, surprisePercent
+        # period format: "2024-09-30"
+
+        # Group by fiscal year and sum quarterly EPS to get annual
+        eps_by_year: Dict[int, List[float]] = {}
+
+        for item in data:
+            eps_value = item.get("actual")
+            period = item.get("period", "")
+
+            if eps_value is None or not period:
+                continue
+
+            try:
+                year = int(period.split("-")[0])
+                if year not in eps_by_year:
+                    eps_by_year[year] = []
+                eps_by_year[year].append(float(eps_value))
+            except (ValueError, IndexError):
+                continue
+
+        # Only include years with 4 quarters of data (complete fiscal year)
+        # Sum quarterly EPS to get annual EPS
+        result = {}
+        for year, quarterly_eps in eps_by_year.items():
+            if len(quarterly_eps) >= 4:
+                # Take only the 4 most recent quarters for that year
+                annual_eps = sum(sorted(quarterly_eps, reverse=True)[:4])
+                result[year] = round(annual_eps, 2)
+                logger.debug(f"{symbol} {year}: Annual EPS from earnings API = {annual_eps:.2f} (from {len(quarterly_eps)} quarters)")
+
+        if result:
+            logger.info(f"Finnhub earnings API for {symbol}: {result}")
+            return result
+
+        return None
+
+    except Exception as e:
+        logger.warning(f"Finnhub earnings API failed for {symbol}: {e}")
+        return None
+
+
+def _get_yfinance_shares_outstanding(symbol: str) -> Optional[int]:
+    """
+    Get current shares outstanding from yfinance info endpoint.
+    This is more reliable than income_stmt on Railway.
+
+    Args:
+        symbol: Stock symbol
+
+    Returns:
+        Number of shares outstanding, or None if failed
+    """
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+
+        if not info:
+            return None
+
+        shares = info.get('sharesOutstanding')
+        if shares and shares > 0:
+            logger.info(f"yfinance shares for {symbol}: {shares:,}")
+            return int(shares)
+        return None
+
+    except Exception as e:
+        logger.warning(f"yfinance shares failed for {symbol}: {e}")
+        return None
+
+
+def _validate_and_correct_eps(symbol: str, financials_by_year: Dict[int, Dict]) -> Dict[int, Dict]:
+    """
+    Validate EPS values and correct them if they appear wrong.
+
+    Calculates expected EPS = Net Income / Shares Outstanding and compares
+    with Finnhub's EPS. If they differ by more than 3x, uses calculated value.
+
+    This catches Finnhub bugs where EPS uses wrong share count.
+
+    Args:
+        symbol: Stock symbol
+        financials_by_year: Financial data from Finnhub
+
+    Returns:
+        Financial data with corrected EPS if needed
+    """
+    if not financials_by_year:
+        return financials_by_year
+
+    # Get current shares outstanding
+    shares = _get_yfinance_shares_outstanding(symbol)
+    if not shares:
+        logger.debug(f"{symbol}: Could not get shares for EPS validation")
+        return financials_by_year
+
+    corrections_made = 0
+
+    for year, data in financials_by_year.items():
+        finnhub_eps = data.get("eps")
+        net_income = data.get("net_income")
+
+        if finnhub_eps is None or net_income is None:
+            continue
+
+        # Calculate expected EPS
+        # Note: shares outstanding changes over time, but for validation
+        # purposes current shares is a reasonable approximation
+        calculated_eps = net_income / shares
+
+        # Check if Finnhub EPS is wildly different (more than 3x off)
+        if finnhub_eps != 0 and calculated_eps != 0:
+            ratio = abs(finnhub_eps / calculated_eps)
+
+            if ratio > 3 or ratio < 0.33:
+                # Finnhub EPS appears wrong, use calculated value
+                logger.warning(
+                    f"{symbol} {year}: EPS validation failed! "
+                    f"Finnhub={finnhub_eps:.2f}, Calculated={calculated_eps:.2f} "
+                    f"(ratio={ratio:.1f}x). Using calculated value."
+                )
+                data["eps"] = round(calculated_eps, 2)
+                corrections_made += 1
+
+    if corrections_made > 0:
+        logger.info(f"{symbol}: Corrected {corrections_made} EPS values via validation")
+
+    return financials_by_year
+
+
 class RateLimiter:
     """Simple rate limiter for API calls."""
 
@@ -632,24 +792,39 @@ class FinnhubService:
                         financials_by_year[year]["current_liabilities"] = yf_cl[year]
                         logger.debug(f"{symbol} {year}: current_liabilities filled from yfinance: {yf_cl[year]}")
 
-        # For symbols with known Finnhub EPS data quality issues, override with correct EPS
-        if symbol in FINNHUB_EPS_PROBLEM_SYMBOLS:
-            logger.info(f"{symbol} is in FINNHUB_EPS_PROBLEM_SYMBOLS - overriding EPS")
+        # PRIMARY FIX: Get EPS from Finnhub's /stock/earnings endpoint instead of SEC filings
+        # This gives actual reported quarterly EPS, not derived values that may have wrong share counts
+        earnings_eps = await _get_finnhub_earnings_eps(symbol, self.api_key)
 
-            # Try yfinance first
-            yf_eps = _get_yfinance_eps(symbol)
+        if earnings_eps:
+            logger.info(f"{symbol}: Using Finnhub earnings API for EPS (direct from API)")
+            for year, eps_value in earnings_eps.items():
+                if year in financials_by_year:
+                    old_eps = financials_by_year[year].get("eps")
+                    financials_by_year[year]["eps"] = eps_value
+                    if old_eps and abs(old_eps - eps_value) > 0.5:
+                        logger.warning(f"{symbol} {year}: EPS corrected from {old_eps:.2f} to {eps_value:.2f} (earnings API)")
+        else:
+            # Earnings API failed - check if it's a known problem stock
+            logger.debug(f"{symbol}: Earnings API returned no data, checking fallbacks")
 
-            # Fallback to hardcoded values if yfinance fails (common on Railway due to rate limits)
-            if not yf_eps and symbol in HARDCODED_EPS_OVERRIDES:
-                logger.info(f"{symbol}: yfinance failed, using hardcoded EPS values")
-                yf_eps = HARDCODED_EPS_OVERRIDES[symbol]
+            if symbol in FINNHUB_EPS_PROBLEM_SYMBOLS:
+                logger.info(f"{symbol} is in FINNHUB_EPS_PROBLEM_SYMBOLS - using fallback EPS")
 
-            if yf_eps:
-                for year, eps_value in yf_eps.items():
-                    if year in financials_by_year:
-                        old_eps = financials_by_year[year].get("eps")
-                        financials_by_year[year]["eps"] = eps_value
-                        logger.info(f"{symbol} {year}: EPS overridden from {old_eps} to {eps_value}")
+                # Try yfinance first
+                yf_eps = _get_yfinance_eps(symbol)
+
+                # Fallback to hardcoded values if yfinance fails (common on Railway due to rate limits)
+                if not yf_eps and symbol in HARDCODED_EPS_OVERRIDES:
+                    logger.info(f"{symbol}: yfinance failed, using hardcoded EPS values")
+                    yf_eps = HARDCODED_EPS_OVERRIDES[symbol]
+
+                if yf_eps:
+                    for year, eps_value in yf_eps.items():
+                        if year in financials_by_year:
+                            old_eps = financials_by_year[year].get("eps")
+                            financials_by_year[year]["eps"] = eps_value
+                            logger.info(f"{symbol} {year}: EPS overridden from {old_eps} to {eps_value}")
 
         return financials_by_year
 
