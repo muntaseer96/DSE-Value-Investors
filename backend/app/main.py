@@ -63,18 +63,22 @@ async def startup_event():
     """Initialize database tables on startup."""
     init_db()
 
-    # Start scheduler for automated tasks (US stocks scraping)
-    if settings.us_stocks_enabled and settings.finnhub_api_key:
-        from app.scheduler import start_scheduler
-        start_scheduler()
+    # NOTE: Railway scheduler disabled - using GitHub Actions for US stock scraping instead
+    # The GitHub Action runs every 3 hours and triggers /us-stocks/trigger-scrape
+    # which properly filters for Common Stock only
+    # if settings.us_stocks_enabled and settings.finnhub_api_key:
+    #     from app.scheduler import start_scheduler
+    #     start_scheduler()
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown."""
-    if settings.us_stocks_enabled:
-        from app.scheduler import stop_scheduler
-        stop_scheduler()
+    # Railway scheduler disabled - using GitHub Actions instead
+    # if settings.us_stocks_enabled:
+    #     from app.scheduler import stop_scheduler
+    #     stop_scheduler()
+    pass
 
 
 # Include routers
