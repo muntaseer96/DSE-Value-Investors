@@ -224,6 +224,26 @@ Project ID: `kjjringoshpczqttxaib`
 - **Cause**: Website uses variant field names
 - **Fix**: Add mapping to `FIELD_MAPPINGS` in `lankabd_scraper.py`
 
+### Finnhub EPS Data Quality Issues (e.g., Visa)
+- **Cause**: Some stocks (like V/Visa) have incorrect EPS in Finnhub's SEC data - often 6-8x too high due to wrong share count calculations
+- **Symptoms**: Absurdly low sticker price, negative EPS growth despite growing company
+- **Detection**: Compare DB EPS with yfinance: `python -c "import yfinance as yf; print(yf.Ticker('V').income_stmt.loc['Basic EPS'])"`
+- **Fix implemented**:
+  1. `FINNHUB_EPS_PROBLEM_SYMBOLS` set in `finnhub_service.py` - identifies affected stocks
+  2. `_get_yfinance_eps()` function - fetches correct EPS from yfinance
+  3. `HARDCODED_EPS_OVERRIDES` dict - fallback when yfinance fails (common on Railway due to Yahoo rate limiting)
+  4. Scraper skips split adjustment for problem stocks (yfinance data already adjusted)
+- **To add a new problem stock**:
+  1. Add symbol to `FINNHUB_EPS_PROBLEM_SYMBOLS`
+  2. Add correct EPS values to `HARDCODED_EPS_OVERRIDES` (get from yfinance locally)
+  3. Re-scrape: `POST /us-stocks/trigger-scrape?symbol=XXX`
+- **Currently affected**: V (Visa)
+
+### yfinance Fails on Railway
+- **Cause**: Yahoo Finance rate limits or blocks Railway's IP addresses
+- **Symptoms**: Logs show `'Ticker' object has no attribute 'income_stmt'` or `Expecting value: line 1 column 1`
+- **Fix**: Use `HARDCODED_EPS_OVERRIDES` as fallback - yfinance works locally but often fails in production
+
 ---
 
 ## Notes
@@ -237,6 +257,16 @@ Project ID: `kjjringoshpczqttxaib`
 ---
 
 ## Recent Changes
+
+### 2026-01-27 (Update 3)
+- **Fixed Visa (V) EPS bug** - Finnhub returns ~8x inflated EPS for Visa due to wrong share count
+  - Root cause: Finnhub's SEC parser uses incorrect share count for V (248M vs actual 1.7B)
+  - Added `FINNHUB_EPS_PROBLEM_SYMBOLS` set to identify affected stocks
+  - Added `_get_yfinance_eps()` function as primary fallback
+  - Added `HARDCODED_EPS_OVERRIDES` dict as secondary fallback (yfinance fails on Railway)
+  - Modified scraper to skip split adjustment for problem stocks
+  - **Before**: EPS $79.62, Sticker $13.95, EPS Growth -0.08%
+  - **After**: EPS $9.74, Sticker $150.59, EPS Growth 14.8%
 
 ### 2026-01-27 (Update 2)
 - **Fixed ORLY valuation bugs** - Three critical fixes for US stock calculations:
