@@ -950,7 +950,6 @@ async def _run_price_update(symbols: List[str], db_url: str):
 
 @router.post("/update-prices")
 async def update_prices(
-    background_tasks: BackgroundTasks,
     batch_size: int = Query(default=500),
     missing_only: bool = Query(default=True),
     db: Session = Depends(get_db)
@@ -1009,7 +1008,8 @@ async def update_prices(
     from app.config import get_settings
     db_url = get_settings().database_url
 
-    background_tasks.add_task(_run_price_update, symbols, db_url)
+    # Use asyncio.create_task for async background task
+    asyncio.create_task(_run_price_update(symbols, db_url))
 
     return {
         "status": "started",
