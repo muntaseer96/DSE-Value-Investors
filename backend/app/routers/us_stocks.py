@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from datetime import datetime
 import asyncio
 import logging
+import pandas as pd
 
 from app.database import get_db
 from app.models.us_stock import USStock, USFinancialData
@@ -595,6 +596,132 @@ async def import_simfin_data(background_tasks: BackgroundTasks):
 async def get_simfin_status():
     """Get the status of SimFin import."""
     return _simfin_progress
+
+
+# ============================================================================
+# EPS/ROIC Update Endpoint (faster than full re-import)
+# ============================================================================
+
+_eps_update_progress = {
+    "running": False,
+    "current": 0,
+    "total": 0,
+    "updated_count": 0,
+}
+
+
+async def _run_eps_update():
+    """Background task to update EPS and ROIC from SimFin derived dataset."""
+    global _eps_update_progress
+    import simfin as sf
+    import os
+    from app.database import SessionLocal
+
+    _eps_update_progress["running"] = True
+    _eps_update_progress["current"] = 0
+    _eps_update_progress["updated_count"] = 0
+
+    try:
+        # Setup SimFin
+        api_key = os.getenv("SIMFIN_API_KEY", "83a17c9a-cd93-47c8-b47e-bec3e4cd23c2")
+        data_dir = os.path.join(os.path.dirname(__file__), "../../simfin_data")
+        sf.set_api_key(api_key)
+        sf.set_data_dir(data_dir)
+        os.makedirs(data_dir, exist_ok=True)
+
+        logger.info("Loading SimFin derived dataset for EPS/ROIC...")
+        derived = sf.load_derived(variant='annual', market='us', refresh_days=0)
+        derived = derived.reset_index()
+
+        _eps_update_progress["total"] = len(derived)
+        logger.info(f"Loaded {len(derived)} derived records")
+
+        # Process in batches
+        db = SessionLocal()
+        batch_size = 100
+        updated = 0
+
+        for i in range(0, len(derived), batch_size):
+            batch = derived.iloc[i:i+batch_size]
+
+            for _, row in batch.iterrows():
+                symbol = row.get('Ticker')
+                year = int(row.get('Fiscal Year'))
+                eps = row.get('Earnings Per Share, Diluted')
+                roic = row.get('Return On Invested Capital')
+
+                if pd.isna(symbol) or pd.isna(year):
+                    continue
+
+                # Update record
+                update_fields = {}
+                if not pd.isna(eps):
+                    update_fields['eps'] = float(eps)
+                if not pd.isna(roic):
+                    update_fields['roic'] = float(roic) * 100  # Convert to percentage
+
+                if update_fields:
+                    result = db.execute(
+                        text("""
+                            UPDATE us_financial_data
+                            SET eps = COALESCE(:eps, eps),
+                                roic = COALESCE(:roic, roic)
+                            WHERE stock_symbol = :symbol AND year = :year
+                        """),
+                        {
+                            "eps": update_fields.get('eps'),
+                            "roic": update_fields.get('roic'),
+                            "symbol": symbol,
+                            "year": year
+                        }
+                    )
+                    if result.rowcount > 0:
+                        updated += 1
+
+            db.commit()
+            _eps_update_progress["current"] = min(i + batch_size, len(derived))
+            _eps_update_progress["updated_count"] = updated
+
+            if i % 5000 == 0:
+                logger.info(f"EPS update progress: {i}/{len(derived)} ({updated} updated)")
+
+        logger.info(f"EPS/ROIC update complete: {updated} records updated")
+
+    except Exception as e:
+        logger.error(f"EPS update failed: {e}")
+        raise
+    finally:
+        _eps_update_progress["running"] = False
+        db.close()
+
+
+@router.post("/update-eps")
+async def update_eps_roic(background_tasks: BackgroundTasks):
+    """Update only EPS and ROIC from SimFin derived dataset.
+
+    Faster than full re-import - only updates these two fields.
+    """
+    global _eps_update_progress
+
+    if _eps_update_progress["running"]:
+        return {
+            "status": "already_running",
+            "progress": _eps_update_progress
+        }
+
+    background_tasks.add_task(_run_eps_update)
+
+    return {
+        "status": "started",
+        "message": "EPS/ROIC update started",
+        "check_progress_at": "/us-stocks/eps-update-status"
+    }
+
+
+@router.get("/eps-update-status")
+async def get_eps_update_status():
+    """Get status of EPS/ROIC update."""
+    return _eps_update_progress
 
 
 # ============================================================================
