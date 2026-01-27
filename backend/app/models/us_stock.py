@@ -77,6 +77,7 @@ class USFinancialData(Base):
     # Balance Sheet
     total_assets = Column(BigInteger)
     total_liabilities = Column(BigInteger)
+    current_liabilities = Column(BigInteger)  # For proper ROIC calculation
     total_equity = Column(BigInteger)  # Book Value
     total_debt = Column(BigInteger)
 

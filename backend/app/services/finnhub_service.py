@@ -187,6 +187,45 @@ def _get_yfinance_debt(symbol: str) -> Optional[Dict[int, float]]:
         return None
 
 
+def _get_yfinance_current_liabilities(symbol: str) -> Optional[Dict[int, float]]:
+    """
+    Fallback to get current liabilities by year from yfinance when Finnhub doesn't have it.
+
+    Args:
+        symbol: Stock symbol
+
+    Returns:
+        Dict mapping year to current_liabilities, or None if failed
+    """
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(symbol)
+        bs = ticker.balance_sheet
+
+        if bs is None or bs.empty:
+            return None
+
+        # Look for Current Liabilities in balance sheet
+        if "Current Liabilities" not in bs.index:
+            return None
+
+        cl_series = bs.loc["Current Liabilities"]
+        result = {}
+
+        for date, value in cl_series.items():
+            if value is not None and not (hasattr(value, '__float__') and value != value):  # Check for NaN
+                year = date.year
+                result[year] = float(value)
+
+        if result:
+            logger.info(f"yfinance current_liabilities fallback for {symbol}: found {len(result)} years")
+        return result if result else None
+
+    except Exception as e:
+        logger.warning(f"yfinance current_liabilities fallback failed for {symbol}: {e}")
+        return None
+
+
 class RateLimiter:
     """Simple rate limiter for API calls."""
 
@@ -244,6 +283,7 @@ GAAP_MAPPINGS = {
     # Assets & Liabilities
     "us-gaap_Assets": "total_assets",
     "us-gaap_Liabilities": "total_liabilities",
+    "us-gaap_LiabilitiesCurrent": "current_liabilities",
     "us-gaap_LiabilitiesAndStockholdersEquity": "total_assets_check",
 
     # Debt
@@ -487,6 +527,20 @@ class FinnhubService:
                     if year in yf_debt:
                         financials_by_year[year]["total_debt"] = yf_debt[year]
                         logger.debug(f"{symbol} {year}: debt filled from yfinance: {yf_debt[year]}")
+
+        # Check if any years are missing current_liabilities - use yfinance fallback
+        years_missing_cl = [
+            year for year, data in financials_by_year.items()
+            if data.get("current_liabilities") is None
+        ]
+
+        if years_missing_cl:
+            yf_cl = _get_yfinance_current_liabilities(symbol)
+            if yf_cl:
+                for year in years_missing_cl:
+                    if year in yf_cl:
+                        financials_by_year[year]["current_liabilities"] = yf_cl[year]
+                        logger.debug(f"{symbol} {year}: current_liabilities filled from yfinance: {yf_cl[year]}")
 
         return financials_by_year
 

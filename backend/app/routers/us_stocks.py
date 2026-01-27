@@ -76,6 +76,7 @@ class USFinancialRecord(BaseModel):
     eps: Optional[float] = None
     total_equity: Optional[int] = None
     total_assets: Optional[int] = None
+    current_liabilities: Optional[int] = None
     total_debt: Optional[int] = None
     operating_cash_flow: Optional[int] = None
     capital_expenditure: Optional[int] = None
@@ -351,6 +352,7 @@ def get_us_stock_fundamentals(symbol: str, db: Session = Depends(get_db)):
                 eps=f.eps,
                 total_equity=f.total_equity,
                 total_assets=f.total_assets,
+                current_liabilities=f.current_liabilities,
                 total_debt=f.total_debt,
                 operating_cash_flow=f.operating_cash_flow,
                 capital_expenditure=f.capital_expenditure,
@@ -838,9 +840,9 @@ def _save_us_stock_data(db: Session, symbol: str, data: Dict):
 
             # Update fields
             for field in ["revenue", "net_income", "eps", "total_equity",
-                         "total_assets", "total_liabilities", "total_debt",
-                         "operating_cash_flow", "capital_expenditure", "gross_profit",
-                         "operating_income"]:
+                         "total_assets", "total_liabilities", "current_liabilities",
+                         "total_debt", "operating_cash_flow", "capital_expenditure",
+                         "gross_profit", "operating_income"]:
                 if field in fin_data:
                     value = fin_data[field]
                     # Apply stock split adjustment to EPS
@@ -874,10 +876,16 @@ def _calculate_financial_ratios(record: USFinancialData):
     # ROIC - Return on Invested Capital (works even with negative equity)
     # ROIC = NOPAT / Invested Capital
     # NOPAT = Operating Income * (1 - Tax Rate), estimate 25% tax rate
-    # Invested Capital = Total Equity + Total Debt
-    if record.operating_income and record.total_debt is not None:
-        # Calculate invested capital (equity can be negative, that's fine)
-        invested_capital = (record.total_equity or 0) + record.total_debt
+    # Invested Capital = Total Assets - Current Liabilities (proper formula)
+    if record.operating_income and record.total_assets:
+        # Calculate invested capital using proper formula
+        # This works regardless of equity being positive or negative
+        if record.current_liabilities is not None:
+            invested_capital = record.total_assets - record.current_liabilities
+        else:
+            # Fallback to old method if current_liabilities not available
+            invested_capital = (record.total_equity or 0) + (record.total_debt or 0)
+
         if invested_capital > 0:
             # Estimate NOPAT with 25% tax rate
             nopat = record.operating_income * 0.75
