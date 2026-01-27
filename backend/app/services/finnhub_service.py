@@ -15,9 +15,10 @@ FINNHUB_EPS_PROBLEM_SYMBOLS = {
 }
 
 # Hardcoded EPS values for problem stocks (fallback when yfinance fails on Railway)
-# Source: Yahoo Finance income statement (Basic EPS)
+# Source: Yahoo Finance income statement (Basic EPS), split-adjusted
 HARDCODED_EPS_OVERRIDES = {
     "V": {
+        # Visa fiscal year ends Sep 30. All values split-adjusted for 4:1 split in Mar 2015
         2025: 10.22,
         2024: 9.74,
         2023: 8.29,
@@ -30,6 +31,10 @@ HARDCODED_EPS_OVERRIDES = {
         2016: 2.84,
         2015: 2.62,
         2014: 2.16,
+        2013: 1.90,
+        2012: 0.89,  # Lower due to litigation charge
+        2011: 1.53,
+        2010: 1.29,
     },
 }
 
