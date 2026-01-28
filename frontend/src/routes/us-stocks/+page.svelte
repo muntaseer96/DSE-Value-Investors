@@ -181,7 +181,8 @@
 
     function formatPriceUpdated(dateStr: string | undefined | null): string {
         if (!dateStr) return 'Price update: Never';
-        const date = new Date(dateStr);
+        // Append 'Z' to indicate UTC (database stores timestamps in UTC without timezone)
+        const date = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
         const now = new Date();
         const diffMs = now.getTime() - date.getTime();
         const diffMins = Math.floor(diffMs / 60000);
