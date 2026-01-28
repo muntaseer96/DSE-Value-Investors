@@ -94,6 +94,7 @@ class USStockPrice(BaseModel):
     valuation_note: Optional[str] = None
     is_sp500: bool = False
     last_fundamental_update: Optional[datetime] = None
+    last_price_update: Optional[datetime] = None
 
 
 class USFinancialRecord(BaseModel):
@@ -254,6 +255,7 @@ def get_all_us_prices(
             valuation_note=stock.valuation_note,
             is_sp500=stock.is_sp500 or False,
             last_fundamental_update=stock.last_fundamental_update,
+            last_price_update=stock.last_price_update,
         ))
 
     return result

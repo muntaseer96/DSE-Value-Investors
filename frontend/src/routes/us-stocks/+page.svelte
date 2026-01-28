@@ -179,6 +179,25 @@
         return `$${value.toFixed(2)}`;
     }
 
+    function formatPriceUpdated(dateStr: string | undefined | null): string {
+        if (!dateStr) return 'Price update: Never';
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diffMs = now.getTime() - date.getTime();
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMs / 3600000);
+        const diffDays = Math.floor(diffMs / 86400000);
+
+        let ago: string;
+        if (diffMins < 1) ago = 'just now';
+        else if (diffMins < 60) ago = `${diffMins}m ago`;
+        else if (diffHours < 24) ago = `${diffHours}h ago`;
+        else if (diffDays < 7) ago = `${diffDays}d ago`;
+        else ago = date.toLocaleDateString();
+
+        return `Price updated: ${ago}`;
+    }
+
     function formatMarketCap(value: number | undefined | null): string {
         if (value === undefined || value === null) return '-';
         if (value >= 1_000_000_000_000) return `$${(value / 1_000_000_000_000).toFixed(1)}T`;
@@ -622,7 +641,7 @@
                                             {/if}
                                         </div>
                                     </td>
-                                    <td class="text-right tabular-nums font-semibold">
+                                    <td class="text-right tabular-nums font-semibold" title={formatPriceUpdated(stock.last_price_update)}>
                                         {formatPrice(stock.current_price)}
                                     </td>
                                     <td class="text-right {getChangeClass(stock.change)}">
@@ -744,7 +763,7 @@
                                 {stock.name.length > 25 ? stock.name.slice(0, 25) + '...' : stock.name}
                             </div>
                         {/if}
-                        <div class="stock-card-price">{formatPrice(stock.current_price)}</div>
+                        <div class="stock-card-price" title={formatPriceUpdated(stock.last_price_update)}>{formatPrice(stock.current_price)}</div>
                         <div class="stock-card-meta">
                             <span>Cap: {formatMarketCap(stock.market_cap)}</span>
                             {#if stock.valuation_status === 'CALCULABLE'}

@@ -401,6 +401,7 @@ export interface USStockPrice {
     valuation_note?: string;
     is_sp500: boolean;
     last_fundamental_update?: string;
+    last_price_update?: string;
 }
 
 export interface USStocksPricesOptions {
