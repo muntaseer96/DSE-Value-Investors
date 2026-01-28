@@ -1233,7 +1233,8 @@ def _calculate_us_valuations(db: Session, symbol: str):
             db.commit()
             return
 
-        pe_avg = 15.0  # Default PE
+        # Use historical PE from database, default to 15 if not available
+        pe_avg = stock.historical_pe if stock.historical_pe and stock.historical_pe > 0 else 15.0
         sticker_calc = StickerPriceCalculator()
         sticker_result = sticker_calc.calculate_from_financials(
             eps_history=eps_for_sticker,
