@@ -953,6 +953,7 @@ async def _run_price_update(symbols: List[str], db_url: str, api_key: str):
 async def update_prices(
     batch_size: int = Query(default=500),
     missing_only: bool = Query(default=True),
+    sp500_only: bool = Query(default=False),
     db: Session = Depends(get_db)
 ):
     """Fetch current prices for stocks from Finnhub/yfinance.
@@ -960,6 +961,7 @@ async def update_prices(
     Args:
         batch_size: Number of stocks to process
         missing_only: If True, only fetch for stocks without prices
+        sp500_only: If True, only fetch for S&P 500 stocks
     """
     global _price_progress
 
@@ -973,17 +975,21 @@ async def update_prices(
             }
         }
 
+    # Build query based on filters
+    sp500_filter = "AND is_sp500 = true" if sp500_only else ""
+
     # Get symbols to update
     if missing_only:
-        result = db.execute(text("""
+        result = db.execute(text(f"""
             SELECT symbol FROM us_stocks
-            WHERE current_price IS NULL
+            WHERE current_price IS NULL {sp500_filter}
             ORDER BY symbol
             LIMIT :limit
         """), {"limit": batch_size})
     else:
-        result = db.execute(text("""
+        result = db.execute(text(f"""
             SELECT symbol FROM us_stocks
+            WHERE 1=1 {sp500_filter}
             ORDER BY last_price_update NULLS FIRST
             LIMIT :limit
         """), {"limit": batch_size})
