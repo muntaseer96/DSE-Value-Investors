@@ -1499,6 +1499,51 @@ def get_us_full_analysis(symbol: str, db: Session = Depends(get_db)):
             detail=f"Insufficient financial data for {symbol}. Run SimFin import first."
         )
 
+    # Limit to most recent 10 years (Phil Town methodology)
+    MAX_YEARS = 10
+    if len(financials) > MAX_YEARS:
+        financials = financials[-MAX_YEARS:]
+
+    # Data freshness check - latest data must be from current year - 2 or newer
+    from datetime import datetime
+    current_year = datetime.now().year
+    latest_data_year = financials[-1].year if financials else 0
+    min_acceptable_year = current_year - 2  # 2024 for 2026
+
+    if latest_data_year < min_acceptable_year:
+        return {
+            "symbol": symbol,
+            "name": stock.name,
+            "sector": stock.sector,
+            "is_sp500": stock.is_sp500,
+            "current_price": stock.current_price,
+            "valuation_status": "NOT_CALCULABLE",
+            "valuation_note": f"Stale data - latest year is {latest_data_year}, need {min_acceptable_year}+",
+            "sticker_price": None,
+            "big_five": None,
+            "four_ms": None,
+            "data_years": len(financials),
+            "recommendation": None,
+        }
+
+    # Latest year EPS must not be negative (can't project growth from losses)
+    latest_financial = financials[-1]
+    if latest_financial.eps is not None and latest_financial.eps < 0:
+        return {
+            "symbol": symbol,
+            "name": stock.name,
+            "sector": stock.sector,
+            "is_sp500": stock.is_sp500,
+            "current_price": stock.current_price,
+            "valuation_status": "NOT_CALCULABLE",
+            "valuation_note": f"Negative EPS in {latest_data_year} (${latest_financial.eps:.2f}) - cannot project growth",
+            "sticker_price": None,
+            "big_five": None,
+            "four_ms": None,
+            "data_years": len(financials),
+            "recommendation": None,
+        }
+
     current_price = stock.current_price
 
     # Extract data series
