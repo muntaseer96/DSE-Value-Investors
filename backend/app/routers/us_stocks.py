@@ -815,12 +815,13 @@ async def calculate_valuations(
     if symbol:
         symbols = [symbol.upper()]
     else:
-        # Get symbols that have financial data
+        # Get symbols that need valuation (UNKNOWN status) and have financial data
         result = db.execute(text("""
             SELECT DISTINCT s.symbol
             FROM us_stocks s
             JOIN us_financial_data f ON s.symbol = f.stock_symbol
             WHERE s.stock_type = 'Common Stock'
+              AND s.valuation_status = 'UNKNOWN'
             ORDER BY s.symbol
             LIMIT :limit
         """), {"limit": batch_size})
