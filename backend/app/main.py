@@ -126,6 +126,15 @@ def scheduler_status():
     }
 
 
+@app.post("/trigger-scheduler", tags=["Health"])
+async def trigger_scheduler():
+    """Manually trigger the scheduler job for testing."""
+    from app.scheduler import update_us_prices_job
+    import asyncio
+    asyncio.create_task(update_us_prices_job())
+    return {"status": "triggered", "message": "Scheduler job triggered in background"}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
