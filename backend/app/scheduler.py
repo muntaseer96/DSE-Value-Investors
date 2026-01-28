@@ -25,7 +25,7 @@ scheduler = BackgroundScheduler()
 
 # Batch size for price updates (respects Finnhub 60 calls/min rate limit)
 # With 0.1s delay between calls, 500 stocks takes ~50 seconds
-PRICE_UPDATE_BATCH_SIZE = 500
+PRICE_UPDATE_BATCH_SIZE = 100
 
 # ============================================================================
 # RUN STATE TRACKING - For debugging via /scheduler-status endpoint
@@ -190,7 +190,7 @@ def update_us_prices_job():
                         logger.warning(f"Failed to update price for {stock.symbol}: {e}")
                         batch_failed += 1
 
-                    await asyncio.sleep(0.1)  # Rate limiting
+                    await asyncio.sleep(2.0)  # Rate limiting: 30 calls/min, well under Finnhub's 60/min limit
 
             return batch_updated, batch_failed
 
