@@ -154,11 +154,15 @@ def update_us_prices_job():
         updated_count = 0
         failed_count = 0
 
-        # Define async function to fetch prices
-        async def fetch_prices():
-            nonlocal updated_count, failed_count
+        # Process in batches to avoid DB connection timeout
+        COMMIT_BATCH_SIZE = 100
+
+        # Define async function to fetch prices for a batch
+        async def fetch_batch_prices(batch_stocks):
+            batch_updated = 0
+            batch_failed = 0
             async with FinnhubService(settings.finnhub_api_key) as service:
-                for i, stock in enumerate(stocks):
+                for stock in batch_stocks:
                     try:
                         quote = await service.get_quote(stock.symbol)
                         price = quote.get("current_price")
@@ -175,28 +179,35 @@ def update_us_prices_job():
                                 stock.discount_to_sticker = (
                                     (price - stock.sticker_price) / stock.sticker_price * 100
                                 )
-                            updated_count += 1
+                            batch_updated += 1
                         else:
                             # Still update timestamp so we don't retry immediately
                             stock.last_price_update = datetime.now()
-                            failed_count += 1
+                            batch_failed += 1
 
                     except Exception as e:
                         print(f"[SCHEDULER] Failed {stock.symbol}: {e}", flush=True)
                         logger.warning(f"Failed to update price for {stock.symbol}: {e}")
-                        failed_count += 1
-
-                    # Progress log every 100 stocks
-                    if (i + 1) % 100 == 0:
-                        print(f"[SCHEDULER] Progress: {i + 1}/{len(stocks)} processed", flush=True)
+                        batch_failed += 1
 
                     await asyncio.sleep(0.1)  # Rate limiting
 
-        # Run the async function in this thread's event loop
-        # Safe because BackgroundScheduler runs jobs in separate threads
-        asyncio.run(fetch_prices())
+            return batch_updated, batch_failed
 
-        db.commit()
+        # Process stocks in batches, committing after each batch
+        for batch_start in range(0, len(stocks), COMMIT_BATCH_SIZE):
+            batch_end = min(batch_start + COMMIT_BATCH_SIZE, len(stocks))
+            batch = stocks[batch_start:batch_end]
+
+            # Fetch prices for this batch
+            batch_updated, batch_failed = asyncio.run(fetch_batch_prices(batch))
+            updated_count += batch_updated
+            failed_count += batch_failed
+
+            # Commit this batch to prevent connection timeout
+            db.commit()
+            print(f"[SCHEDULER] Batch {batch_start}-{batch_end}: {batch_updated} updated, {batch_failed} failed (committed)", flush=True)
+
         print(f"[SCHEDULER] Price update complete: {updated_count} updated, {failed_count} failed", flush=True)
         logger.info(f"Price update complete: {updated_count} updated, {failed_count} failed")
 
