@@ -35,6 +35,7 @@ async def update_us_prices_job():
     if not settings.us_stocks_enabled or not settings.finnhub_api_key:
         return
 
+    print("[SCHEDULER] Starting scheduled US price update (rotating batch)", flush=True)
     logger.info("Starting scheduled US price update (rotating batch)")
 
     db = SessionLocal()
@@ -89,9 +90,11 @@ async def update_us_prices_job():
                 await asyncio.sleep(0.1)  # Rate limiting
 
         db.commit()
+        print(f"[SCHEDULER] Price update complete: {updated_count} updated, {failed_count} failed", flush=True)
         logger.info(f"Price update complete: {updated_count} updated, {failed_count} failed")
 
     except Exception as e:
+        print(f"[SCHEDULER] Price update job failed: {e}", flush=True)
         logger.error(f"Price update job failed: {e}")
 
     finally:
@@ -122,6 +125,7 @@ def setup_scheduler():
         replace_existing=True,
     )
 
+    print(f"[SCHEDULER] Configured with {len(scheduler.get_jobs())} jobs", flush=True)
     logger.info(f"Scheduler configured with {len(scheduler.get_jobs())} jobs")
 
 
@@ -130,8 +134,10 @@ def start_scheduler():
     try:
         setup_scheduler()
         scheduler.start()
+        print("[SCHEDULER] Started successfully", flush=True)
         logger.info("Scheduler started")
     except Exception as e:
+        print(f"[SCHEDULER] Failed to start: {e}", flush=True)
         logger.error(f"Failed to start scheduler: {e}")
 
 
