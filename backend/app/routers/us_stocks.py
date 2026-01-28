@@ -1148,6 +1148,29 @@ def _calculate_us_valuations(db: Session, symbol: str):
         db.commit()
         return
 
+    # Check data freshness and completeness
+    from datetime import datetime
+    current_year = datetime.now().year
+    years_available = sorted([f.year for f in financials])
+    latest_data_year = years_available[-1]
+
+    # Requirement 1: Latest year must be fresh (within 2 years)
+    if latest_data_year < current_year - 2:
+        stock.valuation_status = "NOT_CALCULABLE"
+        stock.valuation_note = f"Stale data (latest: {latest_data_year}, need {current_year - 2}+)"
+        db.commit()
+        return
+
+    # Requirement 2: Need 5 consecutive years up to latest year
+    required_years = set(range(latest_data_year - 4, latest_data_year + 1))
+    available_years = set(years_available)
+    missing_years = required_years - available_years
+    if missing_years:
+        stock.valuation_status = "NOT_CALCULABLE"
+        stock.valuation_note = f"Missing years: {sorted(missing_years)} (need 5 consecutive)"
+        db.commit()
+        return
+
     try:
         # Prepare data for calculations
         fin_data = []

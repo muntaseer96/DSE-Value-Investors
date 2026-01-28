@@ -190,6 +190,18 @@ def merge_financial_data(datasets: Dict[str, pd.DataFrame]) -> pd.DataFrame:
         how='outer'
     )
 
+    # Get shares from income statement for EPS validation
+    shares_diluted = None
+    shares_basic = None
+    if 'Shares (Diluted)' in income.columns:
+        shares_diluted = income[['symbol', 'year', 'Shares (Diluted)']].copy()
+        shares_diluted = shares_diluted.rename(columns={'Shares (Diluted)': 'shares_diluted'})
+        merged = merged.merge(shares_diluted, on=['symbol', 'year'], how='left')
+    if 'Shares (Basic)' in income.columns:
+        shares_basic = income[['symbol', 'year', 'Shares (Basic)']].copy()
+        shares_basic = shares_basic.rename(columns={'Shares (Basic)': 'shares_basic'})
+        merged = merged.merge(shares_basic, on=['symbol', 'year'], how='left')
+
     # Add derived ratios if available
     if datasets['derived'] is not None:
         derived = datasets['derived'].reset_index()
@@ -207,11 +219,63 @@ def merge_financial_data(datasets: Dict[str, pd.DataFrame]) -> pd.DataFrame:
 
         # EPS from derived dataset (not in income statement for free tier)
         if 'Earnings Per Share, Diluted' in derived.columns:
-            derived_cols['eps'] = derived['Earnings Per Share, Diluted']
+            derived_cols['eps_simfin'] = derived['Earnings Per Share, Diluted']
         elif 'Earnings Per Share, Basic' in derived.columns:
-            derived_cols['eps'] = derived['Earnings Per Share, Basic']
+            derived_cols['eps_simfin'] = derived['Earnings Per Share, Basic']
 
         merged = merged.merge(derived_cols, on=['symbol', 'year'], how='left')
+
+    # EPS VALIDATION: Cross-check SimFin EPS against calculated EPS
+    # Calculate EPS from net_income / shares to validate SimFin's EPS
+    def validate_eps(row):
+        """
+        Validate EPS by comparing SimFin's reported EPS with calculated EPS.
+        If they differ by >10x, use calculated value (SimFin data has unit errors for some stocks).
+        """
+        simfin_eps = row.get('eps_simfin')
+        net_income = row.get('net_income')
+        shares = row.get('shares_diluted') or row.get('shares_basic')
+
+        # If we can't calculate, use SimFin's value
+        if pd.isna(net_income) or pd.isna(shares) or shares == 0:
+            return simfin_eps
+
+        calculated_eps = net_income / shares
+
+        # If SimFin EPS is missing, use calculated
+        if pd.isna(simfin_eps):
+            return calculated_eps
+
+        # If both exist, check for major discrepancy (>10x difference)
+        if simfin_eps != 0 and calculated_eps != 0:
+            ratio = abs(simfin_eps / calculated_eps)
+            if ratio > 10 or ratio < 0.1:
+                # Major discrepancy - use calculated EPS
+                logger.warning(
+                    f"EPS mismatch for {row.get('symbol', '?')} {row.get('year', '?')}: "
+                    f"SimFin={simfin_eps:.2f}, Calculated={calculated_eps:.2f}, Using calculated"
+                )
+                return calculated_eps
+
+        # SimFin EPS looks reasonable, use it
+        return simfin_eps
+
+    merged['eps'] = merged.apply(validate_eps, axis=1)
+
+    # Log EPS validation summary
+    if 'eps_simfin' in merged.columns:
+        total_with_eps = merged['eps'].notna().sum()
+        total_with_simfin_eps = merged['eps_simfin'].notna().sum()
+        # Count where we used calculated instead of simfin
+        mismatches = merged.apply(
+            lambda r: pd.notna(r.get('eps_simfin')) and pd.notna(r.get('eps')) and abs(r['eps_simfin'] - r['eps']) > 0.01,
+            axis=1
+        ).sum()
+        logger.info(f"EPS validation: {total_with_eps} total, {mismatches} corrected from SimFin values")
+
+    # Drop temporary columns
+    cols_to_drop = ['eps_simfin', 'shares_diluted', 'shares_basic']
+    merged = merged.drop(columns=[c for c in cols_to_drop if c in merged.columns])
 
     # Calculate ratios if not from derived dataset
     if 'roe' not in merged.columns or merged['roe'].isna().all():
