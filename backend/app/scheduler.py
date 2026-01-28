@@ -9,8 +9,6 @@ from datetime import datetime
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import asc
-
 from app.config import get_settings
 from app.database import SessionLocal
 
@@ -50,7 +48,7 @@ async def update_us_prices_job():
         stocks = db.query(USStock).filter(
             USStock.stock_type == "Common Stock"
         ).order_by(
-            asc(USStock.last_price_update.nullsfirst())
+            USStock.last_price_update.asc().nullsfirst()
         ).limit(PRICE_UPDATE_BATCH_SIZE).all()
 
         if not stocks:
