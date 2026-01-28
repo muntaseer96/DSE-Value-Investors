@@ -281,12 +281,29 @@ class FourMsEvaluator:
 
         # 1. Revenue Stability (25 points) - Lower CV = more stable
         revenue_cv = self._calculate_cv(revenue_history)
+
+        # Check if revenue is declining (compare first half avg to second half avg)
+        valid_revenue = [r for r in revenue_history if r is not None and r > 0]
+        revenue_declining = False
+        if len(valid_revenue) >= 4:
+            first_half = valid_revenue[:len(valid_revenue)//2]
+            second_half = valid_revenue[len(valid_revenue)//2:]
+            first_avg = sum(first_half) / len(first_half)
+            second_avg = sum(second_half) / len(second_half)
+            revenue_declining = second_avg < first_avg * 0.95  # 5% tolerance
+
         if revenue_cv < 15:
             stability_score = 25
-            notes.append("Highly stable revenue - predictable business")
+            if revenue_declining:
+                notes.append("Consistent but declining revenue")
+            else:
+                notes.append("Highly stable revenue - predictable business")
         elif revenue_cv < 25:
             stability_score = 20
-            notes.append("Stable revenue stream")
+            if revenue_declining:
+                notes.append("Stable but declining revenue stream")
+            else:
+                notes.append("Stable revenue stream")
         elif revenue_cv < 40:
             stability_score = 15
             notes.append("Moderate revenue volatility")
@@ -653,9 +670,13 @@ class FourMsEvaluator:
             elif de_avg < 2.0:
                 debt_score = 10
                 notes.append("Elevated debt levels")
-            else:
+            elif de_avg < 3.0:
                 debt_score = 5
                 notes.append("High debt is a concern")
+            else:
+                # D/E >= 3.0 is dangerous - near minimum score
+                debt_score = 2
+                notes.append(f"⚠️ DANGEROUS debt levels (D/E: {de_avg:.1f}) - high bankruptcy risk")
         elif has_positive_equity:
             # Positive equity but no D/E data - debt data is missing from source
             de_avg = 0

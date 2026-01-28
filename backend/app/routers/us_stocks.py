@@ -1148,6 +1148,11 @@ def _calculate_us_valuations(db: Session, symbol: str):
         db.commit()
         return
 
+    # Limit to most recent 10 years (Phil Town methodology)
+    MAX_YEARS = 10
+    if len(financials) > MAX_YEARS:
+        financials = financials[-MAX_YEARS:]
+
     # Check data freshness and completeness
     from datetime import datetime
     current_year = datetime.now().year
@@ -1168,6 +1173,14 @@ def _calculate_us_valuations(db: Session, symbol: str):
     if missing_years:
         stock.valuation_status = "NOT_CALCULABLE"
         stock.valuation_note = f"Missing years: {sorted(missing_years)} (need 5 consecutive)"
+        db.commit()
+        return
+
+    # Requirement 3: Latest year EPS must not be negative (can't project growth from losses)
+    latest_financial = financials[-1]
+    if latest_financial.eps is not None and latest_financial.eps < 0:
+        stock.valuation_status = "NOT_CALCULABLE"
+        stock.valuation_note = f"Negative EPS in {latest_data_year} (${latest_financial.eps:.2f}) - cannot project growth"
         db.commit()
         return
 
