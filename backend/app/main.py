@@ -107,6 +107,25 @@ def health_check():
     }
 
 
+@app.get("/scheduler-status", tags=["Health"])
+def scheduler_status():
+    """Check scheduler status."""
+    from app.scheduler import scheduler
+    jobs = scheduler.get_jobs()
+    return {
+        "scheduler_running": scheduler.running,
+        "job_count": len(jobs),
+        "jobs": [
+            {
+                "id": job.id,
+                "name": job.name,
+                "next_run": str(job.next_run_time) if job.next_run_time else None,
+            }
+            for job in jobs
+        ],
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
