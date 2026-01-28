@@ -1,12 +1,13 @@
 """Big Five Numbers Calculator - Phil Town's Rule #1 Methodology.
 
 The Big Five Numbers measure a company's financial health and growth:
-1. Revenue Growth Rate (CAGR over 5+ years)
-2. EPS Growth Rate (CAGR over 5+ years)
-3. Book Value (Equity) Growth Rate (CAGR over 5+ years)
-4. Operating Cash Flow Growth Rate (CAGR over 5+ years)
-5. Free Cash Flow Growth Rate (CAGR over 5+ years)
+1. Revenue Growth Rate (CAGR over 10 years max)
+2. EPS Growth Rate (CAGR over 10 years max)
+3. Book Value (Equity) Growth Rate (CAGR over 10 years max)
+4. Operating Cash Flow Growth Rate (CAGR over 10 years max)
+5. Free Cash Flow Growth Rate (CAGR over 10 years max)
 
+Uses most recent 10 years of data (Phil Town methodology).
 A company should score at least 3/5 with growth rates >10% to be considered
 a good Rule #1 investment.
 """
@@ -77,9 +78,10 @@ class BigFiveCalculator:
     PASS_THRESHOLD = 0.10  # 10% is minimum acceptable
     WEAK_THRESHOLD = 0.05  # 5% is weak but not terrible
 
-    # Minimum years of data required
+    # Years of data configuration
     MIN_YEARS = 3
     IDEAL_YEARS = 5
+    MAX_YEARS = 10  # Cap at 10 years per Phil Town methodology
 
     def calculate_cagr(self, values: List[float], years_list: List[int] = None) -> float:
         """Calculate Compound Annual Growth Rate.
@@ -313,6 +315,10 @@ class BigFiveCalculator:
         """
         # Sort by year (oldest first)
         sorted_data = sorted(financials, key=lambda x: x.get("year", 0))
+
+        # Limit to most recent MAX_YEARS (10 years per Phil Town methodology)
+        if len(sorted_data) > self.MAX_YEARS:
+            sorted_data = sorted_data[-self.MAX_YEARS:]
 
         # Extract years list for accurate CAGR calculation
         years_list = [f.get("year") for f in sorted_data]
