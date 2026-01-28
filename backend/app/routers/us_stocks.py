@@ -897,51 +897,50 @@ async def _run_price_update(symbols: List[str], db_url: str, api_key: str):
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
-    finnhub = FinnhubService(api_key=api_key)
-
     try:
         _price_progress["total"] = len(symbols)
         _price_progress["started_at"] = datetime.now().isoformat()
 
-        for i, symbol in enumerate(symbols):
-            if not _price_progress["running"]:
-                logger.info("Price update stopped by user")
-                break
+        async with FinnhubService(api_key=api_key) as finnhub:
+            for i, symbol in enumerate(symbols):
+                if not _price_progress["running"]:
+                    logger.info("Price update stopped by user")
+                    break
 
-            _price_progress["current"] = i + 1
-            _price_progress["current_symbol"] = symbol
+                _price_progress["current"] = i + 1
+                _price_progress["current_symbol"] = symbol
 
-            try:
-                quote = await finnhub.get_quote(symbol)
+                try:
+                    quote = await finnhub.get_quote(symbol)
 
-                if quote.get("current_price"):
-                    db.execute(text("""
-                        UPDATE us_stocks SET
-                            current_price = :price,
-                            previous_close = :prev_close,
-                            change = :change,
-                            change_pct = :change_pct,
-                            last_price_update = NOW()
-                        WHERE symbol = :symbol
-                    """), {
-                        "price": quote.get("current_price"),
-                        "prev_close": quote.get("previous_close"),
-                        "change": quote.get("change"),
-                        "change_pct": quote.get("change_pct"),
-                        "symbol": symbol,
-                    })
-                    db.commit()
-                    _price_progress["success_count"] += 1
-                else:
+                    if quote.get("current_price"):
+                        db.execute(text("""
+                            UPDATE us_stocks SET
+                                current_price = :price,
+                                previous_close = :prev_close,
+                                change = :change,
+                                change_pct = :change_pct,
+                                last_price_update = NOW()
+                            WHERE symbol = :symbol
+                        """), {
+                            "price": quote.get("current_price"),
+                            "prev_close": quote.get("previous_close"),
+                            "change": quote.get("change"),
+                            "change_pct": quote.get("change_pct"),
+                            "symbol": symbol,
+                        })
+                        db.commit()
+                        _price_progress["success_count"] += 1
+                    else:
+                        _price_progress["failed_count"] += 1
+                        logger.warning(f"No price data for {symbol}")
+
+                except Exception as e:
                     _price_progress["failed_count"] += 1
-                    logger.warning(f"No price data for {symbol}")
+                    logger.error(f"Error fetching price for {symbol}: {e}")
 
-            except Exception as e:
-                _price_progress["failed_count"] += 1
-                logger.error(f"Error fetching price for {symbol}: {e}")
-
-            # Small delay to respect rate limits
-            await asyncio.sleep(0.1)
+                # Small delay to respect rate limits
+                await asyncio.sleep(0.1)
 
         _price_progress["completed_at"] = datetime.now().isoformat()
 
