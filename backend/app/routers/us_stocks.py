@@ -1435,9 +1435,11 @@ def get_us_four_ms(symbol: str, db: Session = Depends(get_db)):
     sticker_price = 0
 
     if len(eps_for_sticker) >= 2:
+        # Use historical PE from database, default to 15 if not available
+        hist_pe = stock.historical_pe if hasattr(stock, 'historical_pe') and stock.historical_pe and stock.historical_pe > 0 else 15.0
         sticker_result = sticker_calc.calculate_from_financials(
             eps_history=eps_for_sticker,
-            historical_pe=15.0,
+            historical_pe=hist_pe,
         )
         if sticker_result.status == "CALCULABLE":
             sticker_price = sticker_result.sticker_price
@@ -1566,9 +1568,11 @@ def get_us_full_analysis(symbol: str, db: Session = Depends(get_db)):
     sticker_calc = StickerPriceCalculator()
     sticker_result = None
     if len(eps_for_sticker) >= 2:
+        # Use historical PE from database, default to 15 if not available
+        hist_pe = stock.historical_pe if stock.historical_pe and stock.historical_pe > 0 else 15.0
         sticker_result = sticker_calc.calculate_from_financials(
             eps_history=eps_for_sticker,
-            historical_pe=15.0,
+            historical_pe=hist_pe,
             current_price=current_price,
         )
 

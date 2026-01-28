@@ -34,6 +34,7 @@ class USStock(Base):
     recommendation = Column(String(20))  # "STRONG_BUY", "BUY", "HOLD", "SELL"
     valuation_status = Column(String(20), default="UNKNOWN")  # CALCULABLE, NOT_CALCULABLE, UNKNOWN
     valuation_note = Column(String(500))  # Reason if not calculable
+    historical_pe = Column(Float)  # 10-year average PE ratio (from SimFin share prices)
 
     # Scraping metadata
     stock_type = Column(String(50))  # e.g., "Common Stock", "ETP", "ADR"

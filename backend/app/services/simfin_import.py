@@ -90,6 +90,19 @@ def download_all_datasets() -> Dict[str, pd.DataFrame]:
     datasets['companies'] = sf.load_companies(market='us')
     logger.info(f"  Companies: {len(datasets['companies'])} rows")
 
+    # Download Share Prices (for historical PE calculation)
+    logger.info("Downloading Share Prices...")
+    try:
+        datasets['shareprices'] = sf.load_shareprices(
+            variant='daily',
+            market='us',
+            refresh_days=0
+        )
+        logger.info(f"  Share Prices: {len(datasets['shareprices'])} rows")
+    except Exception as e:
+        logger.warning(f"  Could not load share prices: {e}")
+        datasets['shareprices'] = None
+
     return datasets
 
 
@@ -479,6 +492,92 @@ def generate_sql_file(records: List[Dict], output_file: str = "simfin_import.sql
     logger.info(f"SQL file generated: {output_file}")
 
 
+def calculate_historical_pe(datasets: Dict[str, pd.DataFrame], merged_df: pd.DataFrame) -> Dict[str, float]:
+    """
+    Calculate 10-year average PE ratio for each stock.
+
+    Uses year-end closing prices and annual EPS to compute PE for each year,
+    then averages over the available years (up to 10).
+
+    Returns dict mapping symbol -> average historical PE
+    """
+    logger.info("Calculating historical PE ratios...")
+
+    if datasets.get('shareprices') is None:
+        logger.warning("No share price data available - skipping historical PE calculation")
+        return {}
+
+    shareprices = datasets['shareprices'].reset_index()
+
+    # Get year-end prices (last trading day of each year)
+    shareprices['Date'] = pd.to_datetime(shareprices['Date'])
+    shareprices['year'] = shareprices['Date'].dt.year
+
+    # Group by ticker and year, get last price of each year
+    year_end_prices = shareprices.groupby(['Ticker', 'year']).agg({
+        'Close': 'last'  # Last closing price of the year
+    }).reset_index()
+    year_end_prices = year_end_prices.rename(columns={'Ticker': 'symbol', 'Close': 'year_end_price'})
+
+    # Get EPS data from merged financial data
+    eps_data = merged_df[['symbol', 'year', 'eps']].copy()
+    eps_data = eps_data[eps_data['eps'].notna() & (eps_data['eps'] > 0)]  # Only positive EPS
+
+    # Merge prices with EPS
+    pe_data = year_end_prices.merge(eps_data, on=['symbol', 'year'], how='inner')
+
+    # Calculate PE ratio
+    pe_data['pe'] = pe_data['year_end_price'] / pe_data['eps']
+
+    # Filter reasonable PE values (between 1 and 200)
+    pe_data = pe_data[(pe_data['pe'] > 1) & (pe_data['pe'] < 200)]
+
+    # Get current year for 10-year filter
+    current_year = pd.Timestamp.now().year
+    pe_data = pe_data[pe_data['year'] >= current_year - 10]
+
+    # Calculate average PE per symbol
+    avg_pe = pe_data.groupby('symbol')['pe'].mean().to_dict()
+
+    logger.info(f"Calculated historical PE for {len(avg_pe)} stocks")
+
+    return avg_pe
+
+
+def update_historical_pe_in_database(historical_pe: Dict[str, float]):
+    """
+    Update us_stocks table with historical PE values.
+    """
+    if not historical_pe:
+        logger.warning("No historical PE data to update")
+        return
+
+    logger.info(f"Updating historical PE for {len(historical_pe)} stocks...")
+
+    from app.database import SessionLocal
+    from sqlalchemy import text
+
+    db = SessionLocal()
+    updated = 0
+
+    try:
+        for symbol, pe in historical_pe.items():
+            if pe and not pd.isna(pe):
+                db.execute(
+                    text("UPDATE us_stocks SET historical_pe = :pe WHERE symbol = :symbol"),
+                    {"pe": round(pe, 2), "symbol": symbol}
+                )
+                updated += 1
+
+        db.commit()
+        logger.info(f"Updated historical PE for {updated} stocks")
+    except Exception as e:
+        logger.error(f"Error updating historical PE: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def run_full_import(to_database: bool = True, generate_sql: bool = False):
     """
     Run the full import process.
@@ -512,6 +611,11 @@ def run_full_import(to_database: bool = True, generate_sql: bool = False):
     # Import to database
     if to_database:
         imported, updated = import_to_database(records)
+
+        # Calculate and update historical PE ratios
+        historical_pe = calculate_historical_pe(datasets, merged_df)
+        if historical_pe:
+            update_historical_pe_in_database(historical_pe)
 
     # Generate SQL file
     if generate_sql:
