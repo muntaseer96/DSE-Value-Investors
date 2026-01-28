@@ -109,9 +109,10 @@ def health_check():
 
 @app.get("/scheduler-status", tags=["Health"])
 def scheduler_status():
-    """Check scheduler status."""
-    from app.scheduler import scheduler
+    """Check scheduler status with detailed run history for debugging."""
+    from app.scheduler import scheduler, get_scheduler_state
     jobs = scheduler.get_jobs()
+    state = get_scheduler_state()
     return {
         "scheduler_running": scheduler.running,
         "job_count": len(jobs),
@@ -123,16 +124,15 @@ def scheduler_status():
             }
             for job in jobs
         ],
+        "run_state": state,
     }
 
 
 @app.post("/trigger-scheduler", tags=["Health"])
-async def trigger_scheduler():
-    """Manually trigger the scheduler job for testing."""
-    from app.scheduler import update_us_prices_job
-    import asyncio
-    asyncio.create_task(update_us_prices_job())
-    return {"status": "triggered", "message": "Scheduler job triggered in background"}
+def trigger_scheduler_manual():
+    """Manually trigger the scheduler job for testing (runs in background thread)."""
+    from app.scheduler import trigger_price_update
+    return trigger_price_update()
 
 
 if __name__ == "__main__":
